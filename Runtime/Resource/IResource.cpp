@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,18 +19,15 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ===========================================
-#include "../Resource/IResource.h"
-#include "ResourceManager.h"
-#include "../Font/Font.h"
+//= INCLUDES =====================================
+#include "IResource.h"
+#include "../Rendering/Deferred/ShaderVariation.h"
+#include "../Rendering/Animation.h"
 #include "../Audio/AudioClip.h"
-#include "../Graphics/Texture.h"
-#include "../Graphics/Animation.h"
-#include "../Graphics/Model.h"
-#include "../Graphics/Material.h"
-#include "../Graphics/Mesh.h"
-#include "../Graphics/DeferredShaders/ShaderVariation.h"
-//======================================================
+#include "../Rendering/Mesh.h"
+#include "../Rendering/Model.h"
+#include "../Rendering/Font/Font.h"
+//================================================
 
 //= NAMESPACES ==========
 using namespace std;
@@ -38,10 +35,10 @@ using namespace Directus;
 //=======================
 
 template <typename T>
-ResourceType IResource::DeduceResourceType() { return Resource_Unknown; }
+Resource_Type IResource::DeduceResourceType() { return Resource_Unknown; }
+#define INSTANTIATE_ToResourceType(T, enumT) template<> ENGINE_CLASS Resource_Type IResource::DeduceResourceType<T>() { return enumT; }
 // Explicit template instantiation
-#define INSTANTIATE_ToResourceType(T, enumT) template<> ENGINE_CLASS ResourceType IResource::DeduceResourceType<T>() { return enumT; }
-INSTANTIATE_ToResourceType(Texture,			Resource_Texture)
+INSTANTIATE_ToResourceType(RHI_Texture,		Resource_Texture)
 INSTANTIATE_ToResourceType(AudioClip,		Resource_Audio)
 INSTANTIATE_ToResourceType(Material,		Resource_Material)
 INSTANTIATE_ToResourceType(ShaderVariation, Resource_Shader)
@@ -50,25 +47,10 @@ INSTANTIATE_ToResourceType(Model,			Resource_Model)
 INSTANTIATE_ToResourceType(Animation,		Resource_Animation)
 INSTANTIATE_ToResourceType(Font,			Resource_Font)
 
-IResource::IResource(Context* context)
+IResource::IResource(Context* context, Resource_Type type)
 {
 	m_context			= context;
-	m_resourceManager	= m_context->GetSubsystem<ResourceManager>();	
-}
-
-std::weak_ptr<IResource> IResource::_Cache()
-{
-	auto resource = m_resourceManager->GetResourceByName(GetResourceName(), m_resourceType);
-	if (resource.expired())
-	{
-		m_resourceManager->Add(GetSharedPtr());
-		resource = m_resourceManager->GetResourceByName(GetResourceName(), m_resourceType);
-	}
-
-	return resource;
-}
-
-bool IResource::_IsCached()
-{
-	return m_resourceManager->ExistsByName(GetResourceName(), m_resourceType);
+	m_resourceType		= type;
+	m_resourceID		= GENERATE_GUID;
+	m_loadState			= LoadState_Idle;
 }

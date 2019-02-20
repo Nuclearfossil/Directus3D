@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 //= INCLUDES =================
 #include <vector>
-#include "../Core/SubSystem.h"
+#include "../Core/ISubsystem.h"
 //============================
 
 class asIScriptObject;
@@ -39,15 +39,11 @@ namespace Directus
 {
 	class Module;
 
-	class Scripting : public Subsystem
+	class Scripting : public ISubsystem
 	{
 	public:
 		Scripting(Context* context);
 		~Scripting();
-
-		// SUBSYSTEM =============
-		bool Initialize() override;
-		//========================
 
 		void Clear();
 		asIScriptEngine* GetAsIScriptEngine();

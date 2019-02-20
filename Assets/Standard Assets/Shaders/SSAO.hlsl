@@ -1,8 +1,38 @@
-// Hemisphere sample kernel generated according to the needs of the SSAO approach described here:
-// http://john-chapman-graphics.blogspot.co.uk/2013/01/ssao-tutorial.html
-static const float3 sampleKernel[64] = 
+// = INCLUDES ========
+#include "Common.hlsl"
+#include "Vertex.hlsl"
+//====================
+
+//= STRUCTS ========================
+struct PixelInputType
 {
-	float3(0.04977, -0.04471, 0.04996),
+    float4 position : SV_POSITION;
+    float2 uv : TEXCOORD;
+};
+//==================================
+
+//= TEXTURES ======================
+Texture2D texNormal : register(t0);
+Texture2D texDepth  : register(t1);
+Texture2D texNoise  : register(t2);
+//=================================
+
+//= SAMPLERS ===================================
+SamplerState samplerLinear_clamp : register(s0);
+SamplerState samplerLinear_wrap : register(s1);
+//==============================================
+
+//= CONSTANT BUFFERS ===============
+cbuffer DefaultBuffer : register(b1)
+{
+    matrix mWorldViewProjection;
+    matrix mViewProjectionInverse;
+};
+//==================================
+
+static const float3 sampleKernel[64] =
+{
+    float3(0.04977, -0.04471, 0.04996),
 	float3(0.01457, 0.01653, 0.00224),
 	float3(-0.04065, -0.01937, 0.03193),
 	float3(0.01378, -0.09158, 0.04092),
@@ -68,62 +98,68 @@ static const float3 sampleKernel[64] =
 	float3(-0.44272, -0.67928, 0.1865)
 };
 
-static const float intensity = 8.0f;
-static const int kernelSize = 4;
-static const float radius = 0.2f;
-static const float bias = 0.2f;
-static const float2 noiseScale  = float2(resolution.x / 64.0f, resolution.y / 64.0f);
+static const int sample_count		= 32;
+static const float radius			= 0.15f;
+static const float intensity    	= 1.5f;
+static const float2 noiseScale  	= float2(g_resolution.x / 128.0f, g_resolution.y / 128.0f);
 
-// Returns a random normal
-float3 GetRandomNormal(float2 texCoord, SamplerState samplerState)
+float3 GetWorldPosition(float2 uv, SamplerState samplerState, out float depth_linear, out float depth_cs)
 {
-	float3 randNormal = texNoise.Sample(samplerState, texCoord * noiseScale).rgb;
-	return normalize(UnpackNormal(randNormal));
+	float2 depth	= texDepth.Sample(samplerState, uv).rg;
+    depth_linear  	= depth.r * g_camera_far;
+    depth_cs      	= depth.g;
+    return ReconstructPositionWorld(depth_cs, mViewProjectionInverse, uv);
 }
 
-float doAmbientOcclusion(float2 texCoord, float3 position, float3 normal, SamplerState samplerState)
+PixelInputType mainVS(Vertex_PosUv input)
 {
-	float3 originPos 	= position;
-	float3 sampledPos 	= GetPositionWorldFromDepth(texDepth, samplerState, mViewProjectionInverse, texCoord);
-	float3 diff 		= sampledPos - originPos;
-	 
-	float3 v = normalize(diff);
-	float d = length(diff) * noiseScale;
-	float occlusion = max(0.0f, dot(normal, v) - bias) * (1.0f / (1.0f + d));
-    float rangeCheck = smoothstep(0.0f, 1.0f, radius / abs(originPos - sampledPos));
+    PixelInputType output;
 	
-	return occlusion * rangeCheck;
+    input.position.w 	= 1.0f;
+    output.position 	= mul(input.position, mWorldViewProjection);
+    output.uv 			= input.uv;
+	
+    return output;
 }
 
-float SSAO(float2 texCoord, SamplerState samplerState)
+float4 mainPS(PixelInputType input) : SV_TARGET
 {
-	float3 position 	= GetPositionWorldFromDepth(texDepth, samplerState, mViewProjectionInverse, texCoord);
-	float3 randNormal 	= GetRandomNormal(texCoord, samplerState);
-    float3 normal 		= GetNormalUnpacked(texNormal, samplerState, texCoord);
-	float originDepth 	= GetDepthLinear(texDepth, samplerState, nearPlane, farPlane, texCoord);
-	float radius_depth 	= radius / originDepth;
-	float occlusion 	= 0.0f;
+	float2 texCoord			= input.uv;   
+    float depth_linear  	= 0.0f;
+    float depth_cs      	= 0.0f;
+    float3 center_pos       = GetWorldPosition(texCoord, samplerLinear_clamp, depth_linear, depth_cs);
+    float3 center_normal    = Normal_Decode(texNormal.Sample(samplerLinear_clamp, texCoord).xyz);
+	float3 randomVector		= Unpack(texNoise.Sample(samplerLinear_wrap, texCoord * noiseScale).xyz);
+	float radius_depth		= depth_linear / (1.0f / radius);
+	float occlusion_acc     = 0.0f;
+    float3 color            = float3(0.0f, 0.0f, 0.0f);	
 	
-	[unroll(kernelSize)]
-    for( int i = 0; i < kernelSize; i++)
-    {
-		float2 coord1 = reflect(sampleKernel[i], randNormal) * radius_depth;
-		float2 coord2 = float2(coord1.x - coord1.y, coord1.x + coord1.y);
+	// Construct TBN
+	float3 tangent	= normalize(randomVector - center_normal * dot(randomVector, center_normal));
+	float3x3 TBN	= MakeTBN(center_normal, tangent);
 
-		//if(dot(normal, randNormal) < 0.0f)
-            //randNor *= -1.0;
-			
-		float acc = 0.0f;
-		acc += doAmbientOcclusion(texCoord + coord1 * 0.25f, position, normal, samplerState);
-		acc += doAmbientOcclusion(texCoord + coord2 * 0.5f, position, normal, samplerState);
-		acc += doAmbientOcclusion(texCoord + coord1 * 0.75f, position, normal, samplerState);
-		acc += doAmbientOcclusion(texCoord + coord2, position, normal, samplerState);
+    // Occlusion
+	[unroll]
+    for (int i = 0; i < sample_count; i++)
+    {	
+		// Compute sample uv
+		float3 offset		= mul(sampleKernel[i], TBN);
+		float3 samplePosWS	= center_pos + offset * radius_depth;
+		float2 uv			= Project(samplePosWS, g_viewProjection);
 		
-		occlusion += acc * intensity;
+		// Acquire/Compute sample data
+        float3 sample_pos      			= GetWorldPosition(uv, samplerLinear_clamp, depth_linear, depth_cs);
+        float3 center_to_sample			= sample_pos - center_pos;
+		float center_to_sample_distance	= length(center_to_sample);
+		float3 center_to_sample_dir 	= normalize(center_to_sample);
+		
+		// Accumulate
+		float3 sampled_normal   = Normal_Decode(texNormal.Sample(samplerLinear_clamp, uv).xyz);  
+		float occlusion			= dot(center_normal, center_to_sample_dir);
+		float rangeCheck		= center_to_sample_distance <= radius_depth;
+		occlusion_acc 			+= occlusion * rangeCheck * intensity;
     }
+    occlusion_acc /= (float)sample_count;
 
-    occlusion /= (float)kernelSize * 4.0f;
-	occlusion = 1.0f - occlusion;
-	
-	return clamp(occlusion, 0.0f, 1.0f);
+    return saturate(1.0f - occlusion_acc);
 }

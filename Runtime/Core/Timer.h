@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,26 +22,28 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
 
 //= INCLUDES =========
-#include "SubSystem.h"
+#include "ISubsystem.h"
 #include <chrono>
 //====================
 
 namespace Directus
 {
-	class ENGINE_CLASS Timer : public Subsystem
+	class ENGINE_CLASS Timer : public ISubsystem
 	{
 	public:
 		Timer(Context* context);
-		~Timer();
+		~Timer() {}
 
-		void Tick();
-		float GetDeltaTimeMs() { return m_deltaTimeMs; }
-		float GetDeltaTimeSec() { return m_deltaTimeSec; }
+		//= ISubsystem ======
+		void Tick() override;
+		//===================
 
-	private:
-		float m_deltaTimeMs;
-		float m_deltaTimeSec;
+		float GetDeltaTimeMs()	{ return (float)m_deltaTimeMs; }
+		float GetDeltaTimeSec() { return (float)m_deltaTimeMs / 1000.0f; }
 
-		std::chrono::high_resolution_clock::time_point m_previousTime;
+	private:		
+		std::chrono::high_resolution_clock::time_point time_a;
+		std::chrono::high_resolution_clock::time_point time_b;
+		double m_deltaTimeMs;
 	};
 }

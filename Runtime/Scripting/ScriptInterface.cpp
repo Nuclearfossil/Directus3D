@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,25 +19,23 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ================================
+//= INCLUDES ==============================
 #include "ScriptInterface.h"
 #include "../Core/Timer.h"
-#include "../Core/Backends_Imp.h"
-#include "../Logging/Log.h"
-#include "../Graphics/Material.h"
-#include "../Math/Vector3.h"
-#include "../Math/Quaternion.h"
-#include "../Scene/Components/RigidBody.h"
-#include "../Scene/Components/Camera.h"
-#include "../Scene/GameObject.h"
-#include "../Scene/Components/Transform.h"
-#include "../Scene/Components/Renderable.h"
-//===========================================
+#include "../Rendering/Material.h"
+#include "../Input/Input.h"
+#include "../World/Entity.h"
+#include "../World/Components/RigidBody.h"
+#include "../World/Components/Camera.h"
+#include "../World/Components/Transform.h"
+#include "../World/Components/Renderable.h"
+//=========================================
 
-//= NAMESPACES ================
+//= NAMESPACES ========================
 using namespace std;
 using namespace Directus::Math;
-//=============================
+using namespace Helper;
+//=====================================
 
 namespace Directus
 {
@@ -57,20 +55,19 @@ namespace Directus
 		RegisterQuaternion();
 		RegisterTransform();
 		RegisterMaterial();
-		RegisterRenderable();
 		RegisterCamera();
 		RegisterRigidBody();
-		RegisterGameObject();
-		RegisterDebug();
+		RegisterEntity();
+		RegisterLog();
 	}
 
 	void ScriptInterface::RegisterEnumerations()
 	{
 		// Log
 		m_scriptEngine->RegisterEnum("LogType");
-		m_scriptEngine->RegisterEnumValue("LogType", "Info",	int(Log::Info));
-		m_scriptEngine->RegisterEnumValue("LogType", "Warning", int(Log::Warning));
-		m_scriptEngine->RegisterEnumValue("LogType", "Error",	int(Log::Error));
+		m_scriptEngine->RegisterEnumValue("LogType", "Info",	int(Log_Info));
+		m_scriptEngine->RegisterEnumValue("LogType", "Warning", int(Log_Warning));
+		m_scriptEngine->RegisterEnumValue("LogType", "Error",	int(Log_Error));
 
 		// Component types
 		m_scriptEngine->RegisterEnum("ComponentType");
@@ -80,48 +77,44 @@ namespace Directus
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Collider",		int(ComponentType_Collider));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Constraint",	int(ComponentType_Constraint));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Light",			int(ComponentType_Light));
-		m_scriptEngine->RegisterEnumValue("ComponentType", "LineRenderer",	int(ComponentType_LineRenderer));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Renderable",	int(ComponentType_Renderable));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "RigidBody",		int(ComponentType_RigidBody));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Script",		int(ComponentType_Script));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Skybox",		int(ComponentType_Skybox));
 		m_scriptEngine->RegisterEnumValue("ComponentType", "Transform",		int(ComponentType_Transform));
 
-		// Button_Keyboard
-		m_scriptEngine->RegisterEnum("Button_Keyboard");
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "Space",	int(Space));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "Q",		int(Q));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "W",		int(W));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "E",		int(E));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "R",		int(R));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "T",		int(T));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "Y",		int(Y));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "U",		int(U));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "I",		int(I));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "O",		int(O));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "P",		int(P));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "A",		int(A));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "S",		int(S));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "D",		int(D));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "F",		int(F));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "G",		int(G));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "H",		int(H));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "J",		int(J));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "K",		int(K));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "L",		int(L));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "Z",		int(Z));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "X",		int(X));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "C",		int(C));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "V",		int(V));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "B",		int(B));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "N",		int(N));
-		m_scriptEngine->RegisterEnumValue("Button_Keyboard", "M",		int(M));
-
-		// Button_Mouse
-		m_scriptEngine->RegisterEnum("Button_Mouse");
-		m_scriptEngine->RegisterEnumValue("Button_Mouse", "Left",	int(Click_Left));
-		m_scriptEngine->RegisterEnumValue("Button_Mouse", "Middle",	int(Click_Middle));
-		m_scriptEngine->RegisterEnumValue("Button_Mouse", "Right",	int(Click_Right));
+		// KeyCode
+		m_scriptEngine->RegisterEnum("KeyCode");
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Space",			int(Space));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Q",				int(Q));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "W",				int(W));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "E",				int(E));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "R",				int(R));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "T",				int(T));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Y",				int(Y));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "U",				int(U));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "I",				int(I));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "O",				int(O));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "P",				int(P));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "A",				int(A));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "S",				int(S));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "D",				int(D));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "F",				int(F));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "G",				int(G));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "H",				int(H));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "J",				int(J));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "K",				int(K));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "L",				int(L));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Z",				int(Z));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "X",				int(X));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "C",				int(C));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "V",				int(V));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "B",				int(B));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "N",				int(N));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "M",				int(M));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Click_Left",		int(Click_Left));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Click_Middle",	int(Click_Middle));
+		m_scriptEngine->RegisterEnumValue("KeyCode", "Click_Right",		int(Click_Right));
 
 		// ForceMode
 		m_scriptEngine->RegisterEnum("ForceMode");
@@ -136,7 +129,7 @@ namespace Directus
 		m_scriptEngine->RegisterObjectType("Settings", 0, asOBJ_REF | asOBJ_NOCOUNT);
 		m_scriptEngine->RegisterObjectType("Input", 0, asOBJ_REF | asOBJ_NOCOUNT);
 		m_scriptEngine->RegisterObjectType("Time", 0, asOBJ_REF | asOBJ_NOCOUNT);
-		m_scriptEngine->RegisterObjectType("GameObject", 0, asOBJ_REF | asOBJ_NOCOUNT);
+		m_scriptEngine->RegisterObjectType("Entity", 0, asOBJ_REF | asOBJ_NOCOUNT);
 		m_scriptEngine->RegisterObjectType("Transform", 0, asOBJ_REF | asOBJ_NOCOUNT);
 		m_scriptEngine->RegisterObjectType("Renderable", 0, asOBJ_REF | asOBJ_NOCOUNT);
 		m_scriptEngine->RegisterObjectType("Material", 0, asOBJ_REF | asOBJ_NOCOUNT);
@@ -161,11 +154,12 @@ namespace Directus
 	------------------------------------------------------------------------------*/
 	void ScriptInterface::RegisterInput()
 	{
-		m_scriptEngine->RegisterGlobalProperty("Input input", m_context->GetSubsystem<Input>());
+		m_scriptEngine->RegisterGlobalProperty("Input input", m_context->GetSubsystem<Input>().get());
 		m_scriptEngine->RegisterObjectMethod("Input", "Vector2 &GetMousePosition()", asMETHOD(Input, GetMousePosition), asCALL_THISCALL);
 		m_scriptEngine->RegisterObjectMethod("Input", "Vector2 &GetMouseDelta()", asMETHOD(Input, GetMouseDelta), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("Input", "bool GetButtonKeyboard(Button_Keyboard key)", asMETHOD(Input, GetButtonKeyboard), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("Input", "bool GetButtonMouse(Button_Mouse key)", asMETHOD(Input, GetButtonMouse), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Input", "bool GetKey(KeyCode key)", asMETHOD(Input, GetKey), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Input", "bool GetKeyDown(KeyCode key)", asMETHOD(Input, GetKeyDown), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Input", "bool GetKeyUp(KeyCode key)", asMETHOD(Input, GetKeyUp), asCALL_THISCALL);
 	}
 
 	/*------------------------------------------------------------------------------
@@ -173,26 +167,26 @@ namespace Directus
 	------------------------------------------------------------------------------*/
 	void ScriptInterface::RegisterTime()
 	{
-		m_scriptEngine->RegisterGlobalProperty("Time time", m_context->GetSubsystem<Timer>());
+		m_scriptEngine->RegisterGlobalProperty("Time time", m_context->GetSubsystem<Timer>().get());
 		m_scriptEngine->RegisterObjectMethod("Time", "float GetDeltaTime()", asMETHOD(Timer, GetDeltaTimeSec), asCALL_THISCALL);
 	}
 
 	/*------------------------------------------------------------------------------
-										[GAMEOBJECT]
+										[Entity]
 	------------------------------------------------------------------------------*/
 
-	void ScriptInterface::RegisterGameObject()
+	void ScriptInterface::RegisterEntity()
 	{
-		m_scriptEngine->RegisterObjectMethod("GameObject", "GameObject &opAssign(const GameObject &in)", asMETHODPR(GameObject, operator =, (const GameObject&), GameObject&), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "int GetID()", asMETHOD(GameObject, GetID), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "string GetName()", asMETHOD(GameObject, GetName), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "void SetName(string)", asMETHOD(GameObject, SetName), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "bool IsActive()", asMETHOD(GameObject, IsActive), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "void SetActive(bool)", asMETHOD(GameObject, SetActive), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "Transform &GetTransform()", asMETHOD(GameObject, GetTransform_PtrRaw), asCALL_THISCALL);	
-		m_scriptEngine->RegisterObjectMethod("GameObject", "Camera &GetCamera()", asMETHOD(GameObject, GetComponent<Camera>), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "RigidBody &GetRigidBody()", asMETHOD(GameObject, GetComponent<RigidBody>), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("GameObject", "Renderable &GetRenderable()", asMETHOD(GameObject, GetComponent<Renderable>), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "Entity &opAssign(const Entity &in)", asMETHODPR(Entity, operator =, (const Entity&), Entity&), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "int GetID()", asMETHOD(Entity, GetID), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "string GetName()", asMETHOD(Entity, GetName), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "void SetName(string)", asMETHOD(Entity, SetName), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "bool IsActive()", asMETHOD(Entity, IsActive), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "void SetActive(bool)", asMETHOD(Entity, SetActive), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "Transform &GetTransform()", asMETHOD(Entity, GetTransform_PtrRaw), asCALL_THISCALL);	
+		m_scriptEngine->RegisterObjectMethod("Entity", "Camera &GetCamera()", asMETHOD(Entity, GetComponent<Camera>), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "RigidBody &GetRigidBody()", asMETHOD(Entity, GetComponent<RigidBody>), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Entity", "Renderable &GetRenderable()", asMETHOD(Entity, GetComponent<Renderable>), asCALL_THISCALL);
 	}
 
 	/*------------------------------------------------------------------------------
@@ -220,33 +214,26 @@ namespace Directus
 		m_scriptEngine->RegisterObjectMethod("Transform", "Transform &GetParent()", asMETHOD(Transform, GetParent), asCALL_THISCALL);
 		m_scriptEngine->RegisterObjectMethod("Transform", "Transform &GetChildByIndex(int)", asMETHOD(Transform, GetChildByIndex), asCALL_THISCALL);
 		m_scriptEngine->RegisterObjectMethod("Transform", "Transform &GetChildByName(string)", asMETHOD(Transform, GetChildByName), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("Transform", "GameObject &GetGameObject()", asMETHOD(Transform, GetGameObject_PtrRaw), asCALL_THISCALL);
+		m_scriptEngine->RegisterObjectMethod("Transform", "Entity &GetEntity()", asMETHOD(Transform, GetEntity_PtrRaw), asCALL_THISCALL);
 		m_scriptEngine->RegisterObjectMethod("Transform", "void Translate(const Vector3& in)", asMETHOD(Transform, Translate), asCALL_THISCALL);
 		m_scriptEngine->RegisterObjectMethod("Transform", "void Rotate(const Quaternion& in)", asMETHOD(Transform, Rotate), asCALL_THISCALL);
-		m_scriptEngine->RegisterObjectMethod("Transform", "void RotateLocal(const Quaternion& in)", asMETHOD(Transform, RotateLocal), asCALL_THISCALL);
 	}
 
-	//= MATERIAL ====================================================================
+	/*------------------------------------------------------------------------------
+								[MATERIAL]
+	------------------------------------------------------------------------------*/
 	void ScriptInterface::RegisterMaterial()
 	{
 		m_scriptEngine->RegisterObjectMethod("Material", "void SetOffsetUV(Vector2)", asMETHOD(Material, SetOffset), asCALL_THISCALL);
 	}
-	//===============================================================================
 
-
-	//= RENDERABLE ==================================================================
-	void ScriptInterface::RegisterRenderable()
-	{
-		m_scriptEngine->RegisterObjectMethod("Renderable", "Material &GetMaterial()", asMETHOD(Renderable, GetMaterial_RefWeak), asCALL_THISCALL);
-	}
-	//===============================================================================
-
-	//= CAMERA ======================================================================
+	/*------------------------------------------------------------------------------
+									[CAMERA]
+	------------------------------------------------------------------------------*/
 	void ScriptInterface::RegisterCamera()
 	{
 
 	}
-	//===============================================================================
 
 	/*------------------------------------------------------------------------------
 									[RIGIDBODY]
@@ -466,10 +453,9 @@ namespace Directus
 		m_scriptEngine->RegisterGlobalFunction("Quaternion FromLookRotation(const Vector3& in, const Vector3& in)", asFUNCTIONPR(Quaternion::FromLookRotation, (const Vector3&, const Vector3&), Quaternion), asCALL_CDECL);
 		//========================================================================================================================================================================================
 
-		//= STATIC FUNCTIONS =============================================================================================================================================================================
-		m_scriptEngine->RegisterGlobalFunction("Quaternion QuaternionFromYawPitchRoll(float, float, float)", asFUNCTIONPR(Quaternion::FromYawPitchRoll, (float, float, float), Quaternion), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("Quaternion QuaternionFromEuler(const Vector3& in)", asFUNCTIONPR(Quaternion::FromEulerAngles, (const Vector3&), Quaternion), asCALL_CDECL);
-		//================================================================================================================================================================================================
+		//= STATIC FUNCTIONS =====================================================================================================================================================================
+		m_scriptEngine->RegisterGlobalFunction("Quaternion Quaternion_FromEulerAngles(const Vector3& in)", asFUNCTIONPR(Quaternion::FromEulerAngles, (const Vector3&), Quaternion), asCALL_CDECL);
+		//========================================================================================================================================================================================
 	}
 
 	/*------------------------------------------------------------------------------
@@ -477,19 +463,19 @@ namespace Directus
 	------------------------------------------------------------------------------*/
 	void ScriptInterface::RegisterMath()
 	{
-		//m_scriptEngine->RegisterGlobalFunction("float Clamp(float, float)", asFUNCTIONPR(Clamp, (float, float), float), asCALL_CDECL);
+		//m_scriptEngine->RegisterGlobalFunction("float Math_Clamp<class T>(float, float, float)", asFUNCTIONPR(Clamp, (float, float, float), float), asCALL_CDECL);
 	}
 
 	/*------------------------------------------------------------------------------
 										[LOG]
 	------------------------------------------------------------------------------*/
-	void ScriptInterface::RegisterDebug()
+	void ScriptInterface::RegisterLog()
 	{
-		m_scriptEngine->RegisterGlobalFunction("void Log(const string& in, LogType)", asFUNCTIONPR(Log::Write, (const string&, Log::LogType), void), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("void Log(int, LogType)", asFUNCTIONPR(Log::Write, (int, Log::LogType), void), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("void Log(bool, LogType)", asFUNCTIONPR(Log::Write, (bool, Log::LogType), void), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("void Log(float, LogType)", asFUNCTIONPR(Log::Write, (float, Log::LogType), void), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("void Log(const Vector3& in, LogType)", asFUNCTIONPR(Log::Write, (const Vector3&, Log::LogType), void), asCALL_CDECL);
-		m_scriptEngine->RegisterGlobalFunction("void Log(const Quaternion& in, LogType)", asFUNCTIONPR(Log::Write, (const Quaternion&, Log::LogType), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(const string& in, LogType)",		asFUNCTIONPR(Log::Write, (const string&, Log_Type), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(int, LogType)",					asFUNCTIONPR(Log::Write, (int, Log_Type), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(bool, LogType)",					asFUNCTIONPR(Log::Write, (bool, Log_Type), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(float, LogType)",					asFUNCTIONPR(Log::Write, (float, Log_Type), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(const Vector3& in, LogType)",		asFUNCTIONPR(Log::Write, (const Vector3&, Log_Type), void), asCALL_CDECL);
+		m_scriptEngine->RegisterGlobalFunction("void Log(const Quaternion& in, LogType)",	asFUNCTIONPR(Log::Write, (const Quaternion&, Log_Type), void), asCALL_CDECL);
 	}
 }

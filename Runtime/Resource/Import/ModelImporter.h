@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,12 +20,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 #pragma once
-#include <string>
 
-//= INCLUDES =====================
+//= INCLUDES ========================
 #include "../../Core/EngineDefs.h"
+#include "../../RHI/RHI_Definition.h"
 #include <memory>
-//================================
+#include <string>
+#include <vector>
+//===================================
 
 struct aiNode;
 struct aiScene;
@@ -34,45 +36,32 @@ struct aiMesh;
 
 namespace Directus
 {
-	enum TextureType;
 	class Mesh;
 	class Context;
 	class Material;
-	class GameObject;
+	class Entity;
 	class Model;
 	class Transform;
+	class World;
 
 	class ENGINE_CLASS ModelImporter
 	{
 	public:
 		ModelImporter(Context* context);
-		~ModelImporter();
+		~ModelImporter() {}
 
-		bool Load(Model* model, const std::string& filePath);
+		bool Load(std::shared_ptr<Model> model, const std::string& filePath);
 
 	private:
 		// PROCESSING
-		void ReadNodeHierarchy(
-			Model* model, 
-			const aiScene* assimpScene, 
-			aiNode* assimpNode,
-			std::weak_ptr<GameObject> parentNode = std::weak_ptr<GameObject>(), 
-			std::weak_ptr<GameObject> newNode = std::weak_ptr<GameObject>()
-		);
-		void ReadAnimations(Model* model, const aiScene* scene);
-		void LoadMesh(Model* model, aiMesh* assimpMesh, const aiScene* assimpScene, const std::weak_ptr<GameObject>& parentGameObject);
-		void LoadAiMeshVertices(aiMesh* assimpMesh, const std::shared_ptr<Mesh>& mesh);
-		void LoadAiMeshIndices(aiMesh* assimpMesh, const std::shared_ptr<Mesh>& mesh);
-		std::shared_ptr<Material> AiMaterialToMaterial(Model* model, aiMaterial* assimpMaterial);
-
-		// HELPER FUNCTIONS
-		std::string ValidateTexturePath(const std::string& texturePath);
-		std::string TryPathWithMultipleExtensions(const std::string& fullpath);
-		void ComputeNodeCount(aiNode* node, int* count);
-	
-		Model* m_model;
-		std::string m_modelPath;
+		void ReadNodeHierarchy(const aiScene* assimpScene, aiNode* assimpNode, std::shared_ptr<Model>& model, Entity* parentNode = nullptr, Entity* newNode = nullptr);
+		void ReadAnimations(const aiScene* scene, std::shared_ptr<Model>& model);
+		void LoadMesh(const aiScene* assimpScene, aiMesh* assimpMesh, std::shared_ptr<Model>& model, Entity* parententity);
+		void AssimpMesh_ExtractVertices(aiMesh* assimpMesh, std::vector<RHI_Vertex_PosUvNorTan>* vertices);
+		void AssimpMesh_ExtractIndices(aiMesh* assimpMesh, std::vector<unsigned int>* indices);
+		std::shared_ptr<Material> AiMaterialToMaterial(aiMaterial* assimpMaterial, std::shared_ptr<Model>& model);
 
 		Context* m_context;
+		World* m_world;
 	};
 }

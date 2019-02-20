@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -78,10 +78,9 @@ namespace Directus::Math
 		static Vector4 Transform(const Vector3& lhs, const Matrix& rhs);
 
 		std::string ToString() const;
+		const float* Data() const { return &x; }
 
 		float x, y, z, w;
-
-		const float* Data() const { return &x; }
 
 		static const Vector4 One;
 		static const Vector4 Zero;

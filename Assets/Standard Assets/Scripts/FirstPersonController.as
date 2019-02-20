@@ -1,18 +1,18 @@
 class FirstPersonController
 {
-	GameObject @gameobject;
+	Entity @entity;
 	Transform @transform;
 	
 	// wasd movement
-	float acceleration = 1.5f;
-	float drag = 0.8f;
-	Vector3 movementSpeed = Vector3(0,0,0);
+	float acceleration 		= 1.0f;
+	float drag 				= acceleration * 0.8f;
+	Vector3 movementSpeed 	= Vector3(0,0,0);
 
 	// Constructor
-	FirstPersonController(GameObject @obj)
+	FirstPersonController(Entity @entityIn)
 	{
-		@gameobject = obj;
-		@transform = gameobject.GetTransform();
+		@entity 	= entityIn;
+		@transform 	= entity.GetTransform();
 	}
 	
 	// Use this for initialization
@@ -24,7 +24,7 @@ class FirstPersonController
 	// Update is called once per frame
 	void Update()
 	{
-		if (input.GetButtonMouse(Right))
+		if (input.GetKey(Click_Right))
 		{
 			FPSMovement();
 		}	
@@ -33,22 +33,22 @@ class FirstPersonController
 	void FPSMovement()
 	{
 		// Move forward
-		if (input.GetButtonKeyboard(W))
+		if (input.GetKey(W))
 		{
 			movementSpeed += acceleration * transform.GetForward() * time.GetDeltaTime();
 		}		
 		// Move backward
-		if (input.GetButtonKeyboard(S))
+		if (input.GetKey(S))
 		{
 			movementSpeed -= acceleration * transform.GetForward() * time.GetDeltaTime();
 		}
 		// Move right
-		if (input.GetButtonKeyboard(D))
+		if (input.GetKey(D))
 		{
 			movementSpeed += acceleration * transform.GetRight() * time.GetDeltaTime();
 		}
 		// Move left
-		if (input.GetButtonKeyboard(A))
+		if (input.GetKey(A))
 		{
 			movementSpeed -= acceleration * transform.GetRight() * time.GetDeltaTime();
 		}

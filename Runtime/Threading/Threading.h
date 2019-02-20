@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,8 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <thread>
 #include <mutex>
 #include <queue>
-#include "../Core/SubSystem.h"
+#include "../Core/ISubsystem.h"
+#include "../Logging/Log.h"
 //============================
 
 namespace Directus
@@ -45,15 +46,11 @@ namespace Directus
 	};
 	//======================================================================================
 
-	class Threading : public Subsystem
+	class Threading : public ISubsystem
 	{
 	public:
 		Threading(Context* context);
 		~Threading();
-
-		//= Subsystem ============
-		bool Initialize() override;
-		//========================
 
 		// This function is invoked by the threads
 		void Invoke();
@@ -62,6 +59,13 @@ namespace Directus
 		template <typename Function>
 		void AddTask(Function&& function)
 		{
+			if (m_threads.empty())
+			{
+				LOG_WARNING("Threading::AddTask: No available threads, function will execute in the same thread");
+				function();
+				return;
+			}
+
 			// Lock tasks mutex
 			std::unique_lock<std::mutex> lock(m_tasksMutex);
 
@@ -76,7 +80,7 @@ namespace Directus
 		}
 
 	private:
-		int m_threadCount = 7;
+		unsigned int m_threadCount;
 		std::vector<std::thread> m_threads;
 		std::queue<std::shared_ptr<Task>> m_tasks;
 		std::mutex m_tasksMutex;

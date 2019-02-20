@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,6 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 //= INCLUDES ==============
 #include "Quaternion.h"
-#include "MathHelper.h"
 #include "../Math/Matrix.h"
 //=========================
 
@@ -51,21 +50,6 @@ namespace Directus::Math
 		).GetRotation();
 	}
 	//========================================================================================
-
-	Quaternion Quaternion::Inverse(const Quaternion& q)
-	{
-		float lenSquared = q.LengthSquared();
-
-		if (lenSquared == 1.0f)
-			return q.Conjugate();
-
-		if (lenSquared >= M_EPSILON)
-			return q.Conjugate() * (1.0f / lenSquared);
-
-		// impemented this here because Identity (static)
-		// doesnt play well with dllexport
-		return Quaternion(0, 0, 0, 1);
-	}
 
 	string Quaternion::ToString() const
 	{

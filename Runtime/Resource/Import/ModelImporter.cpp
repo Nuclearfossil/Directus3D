@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,200 +19,180 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ================================
+//= INCLUDES =================================
 #include "ModelImporter.h"
-#include <vector>
-#include <future>
-#include <assimp/scene.h>
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/version.h>
 #include "AssimpHelper.h"
-#include "../../Core/Context.h"
-#include "../../Core/Settings.h"
-#include "../../Core/EventSystem.h"
-#include "../../FileSystem/FileSystem.h"
-#include "../../Logging/Log.h"
-#include "../../Graphics/Model.h"
-#include "../../Graphics/Animation.h"
-#include "../../Graphics/Mesh.h"
-#include "../../Graphics/Material.h"
-#include "../../Scene/Scene.h"
-#include "../../Scene/Components/Transform.h"
-#include "../../Scene/GameObject.h"
 #include "../ProgressReport.h"
-//===========================================
+#include "../../Core/Settings.h"
+#include "../../Rendering/Model.h"
+#include "../../Rendering/Animation.h"
+#include "../../Rendering/Material.h"
+#include "../../World/Components/Renderable.h"
+//============================================
 
 //= NAMESPACES ================
 using namespace std;
 using namespace Directus::Math;
+using namespace Assimp;
 //=============================
-
-// Things for Assimp to do
-static auto ppsteps =
-aiProcess_CalcTangentSpace |
-aiProcess_GenSmoothNormals |
-aiProcess_JoinIdenticalVertices |
-aiProcess_ImproveCacheLocality |
-aiProcess_LimitBoneWeights |
-aiProcess_SplitLargeMeshes |
-aiProcess_Triangulate |
-aiProcess_GenUVCoords |
-aiProcess_SortByPType |
-aiProcess_FindDegenerates |
-aiProcess_FindInvalidData |
-aiProcess_FindInstances |
-aiProcess_ValidateDataStructure |
-aiProcess_OptimizeMeshes |
-aiProcess_Debone |
-aiProcess_ConvertToLeftHanded;
-
-static int normalSmoothAngle = 80;
 
 namespace Directus
 {
-	vector<string> materialNames;
+	namespace _ModelImporter
+	{
+		static float maxNormalSmoothingAngle	= 80.0f;	// Normals exceeding this limit are not smoothed.
+		static float maxTangentSmoothingAngle	= 80.0f;	// Tangents exceeding this limit are not smoothed. Default is 45, max is 175
+		std::string m_modelPath;
+
+		// Things for Assimp to do
+		static auto flags =
+			aiProcess_CalcTangentSpace |
+			aiProcess_GenSmoothNormals |
+			aiProcess_JoinIdenticalVertices |
+			aiProcess_OptimizeMeshes |
+			aiProcess_ImproveCacheLocality |
+			aiProcess_LimitBoneWeights |
+			aiProcess_SplitLargeMeshes |
+			aiProcess_Triangulate |
+			aiProcess_GenUVCoords |
+			aiProcess_SortByPType |
+			aiProcess_FindDegenerates |
+			aiProcess_FindInvalidData |
+			aiProcess_FindInstances |
+			aiProcess_ValidateDataStructure |
+			aiProcess_Debone |
+			aiProcess_ConvertToLeftHanded;
+	}
 
 	ModelImporter::ModelImporter(Context* context)
 	{
-		m_context = context;
-		m_model = nullptr;
+		m_context	= context;
+		m_world		= context->GetSubsystem<World>().get();
 
-		// Log version
-		int major = aiGetVersionMajor();
-		int minor = aiGetVersionMinor();
-		int rev = aiGetVersionRevision();
-		Settings::Get().g_versionAssimp = to_string(major) + "." + to_string(minor) + "." + to_string(rev);
-		LOG_INFO("ModelImporter: Assimp " + Settings::Get().g_versionAssimp);
+		// Get version
+		int major	= aiGetVersionMajor();
+		int minor	= aiGetVersionMinor();
+		int rev		= aiGetVersionRevision();
+		Settings::Get().m_versionAssimp = to_string(major) + "." + to_string(minor) + "." + to_string(rev);
 	}
 
-	ModelImporter::~ModelImporter()
-	{
-
-	}
-
-	bool ModelImporter::Load(Model* model, const string& filePath)
+	bool ModelImporter::Load(shared_ptr<Model> model, const string& filePath)
 	{
 		if (!m_context)
 		{
-			LOG_ERROR("Aborting loading. ModelImporter requires an initialized Context");
+			LOG_ERROR_INVALID_INTERNALS();
 			return false;
 		}
 
-		m_model = model;
-		m_modelPath = filePath;
+		_ModelImporter::m_modelPath = filePath;
 
 		// Set up an Assimp importer
-		Assimp::Importer importer;
-		importer.SetPropertyInteger(AI_CONFIG_PP_ICL_PTCACHE_SIZE, 64); // Optimize mesh
-		importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE, aiPrimitiveType_LINE | aiPrimitiveType_POINT); // Remove points and lines.
-		importer.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, aiComponent_CAMERAS | aiComponent_LIGHTS); // Remove cameras and lights
-		importer.SetPropertyInteger(AI_CONFIG_PP_CT_MAX_SMOOTHING_ANGLE, normalSmoothAngle); // Default is 45, max is 175
+		Importer importer;	
+		// Set normal smoothing angle
+		importer.SetPropertyFloat(AI_CONFIG_PP_GSN_MAX_SMOOTHING_ANGLE, _ModelImporter::maxNormalSmoothingAngle);
+		// Set tangent smoothing angle
+		importer.SetPropertyFloat(AI_CONFIG_PP_CT_MAX_SMOOTHING_ANGLE, _ModelImporter::maxTangentSmoothingAngle);	
+		// Maximum number of triangles in a mesh (before splitting)
+		unsigned int triangleLimit = 1000000;
+		importer.SetPropertyInteger(AI_CONFIG_PP_SLM_TRIANGLE_LIMIT, triangleLimit);
+		// Maximum number of vertices in a mesh (before splitting)
+		unsigned int vertexLimit = 1000000;
+		importer.SetPropertyInteger(AI_CONFIG_PP_SLM_VERTEX_LIMIT, vertexLimit);
+		// Remove points and lines.
+		importer.SetPropertyInteger(AI_CONFIG_PP_SBP_REMOVE, aiPrimitiveType_LINE | aiPrimitiveType_POINT);	
+		// Remove cameras and lights
+		importer.SetPropertyInteger(AI_CONFIG_PP_RVC_FLAGS, aiComponent_CAMERAS | aiComponent_LIGHTS);		
+		// Enable progress tracking
+		importer.SetPropertyBool(AI_CONFIG_GLOB_MEASURE_TIME, true);
+		importer.SetProgressHandler(new AssimpHelper::AssimpProgress(filePath));
+		// Enable logging
+		DefaultLogger::set(new AssimpHelper::AssimpLogger());
 
 		// Read the 3D model file from disk
-		ProgressReport::Get().Reset(g_progress_ModelImporter);
-		ProgressReport::Get().SetStatus(g_progress_ModelImporter, "Loading \"" + FileSystem::GetFileNameFromFilePath(filePath) + "\" from disk...");
-		const aiScene* scene = importer.ReadFile(m_modelPath, ppsteps);
-		if (!scene)
+		const aiScene* scene = importer.ReadFile(_ModelImporter::m_modelPath, _ModelImporter::flags);
+		bool result = scene != nullptr;
+		if (result)
 		{
-			LOG_ERROR("ModelImporter: Failed to load \"" + model->GetResourceName() + "\". " + importer.GetErrorString());
-			ProgressReport::Get().SetIsLoading(g_progress_ModelImporter, false);
-			return false;
-		}
-
-		// Map all the nodes as GameObjects while maintaining hierarchical relationships
-		// as well as their properties (meshes, materials, textures etc.).
-		ReadNodeHierarchy(model, scene, scene->mRootNode);
-
-		// Load animation (in case there are any)
-		ReadAnimations(model, scene);
-
-		// Cleanup
-		importer.FreeScene();
-
-		// Stats
-		ProgressReport::Get().SetIsLoading(g_progress_ModelImporter, false);
-
-		FIRE_EVENT(EVENT_MODEL_LOADED);
-
-		return true;
-	}
-
-	//= PROCESSING ===============================================================================
-	void ModelImporter::ReadNodeHierarchy(Model* model, const aiScene* assimpScene, aiNode* assimpNode, const weak_ptr<GameObject> parentNode, weak_ptr<GameObject> newNode)
-	{
-		auto scene = m_context->GetSubsystem<Scene>();
-
-		// Is this the root node?
-		if (!assimpNode->mParent || newNode.expired())
-		{
-			newNode = scene->GameObject_CreateAdd();
-			model->SetRootGameObject(newNode.lock());
-
-			int jobCount;
-			ComputeNodeCount(assimpNode, &jobCount);
-			ProgressReport::Get().SetJobCount(g_progress_ModelImporter, jobCount);
-		}
-
-		//= GET NODE NAME ============================================================
-		// Note: In case this is the root node, aiNode.mName will be "RootNode". 
-		// To get a more descriptive name we instead get the name from the file path.
-		if (assimpNode->mParent)
-		{
-			string name = assimpNode->mName.C_Str();
-			newNode.lock()->SetName(name);
-
-			ProgressReport::Get().SetStatus(g_progress_ModelImporter, "Processing: " + name);
+			FIRE_EVENT(Event_World_Stop);
+			ReadNodeHierarchy(scene, scene->mRootNode, model);
+			ReadAnimations(scene, model);
+			model->Geometry_Update();
+			FIRE_EVENT(Event_World_Start);
 		}
 		else
 		{
-			string name = FileSystem::GetFileNameNoExtensionFromFilePath(m_modelPath);
-			newNode.lock()->SetName(name);
-
-			ProgressReport::Get().SetStatus(g_progress_ModelImporter, "Processing: " + name);
+			LOGF_ERROR("%s", importer.GetErrorString());
 		}
-		//============================================================================
+
+		importer.FreeScene();
+
+		return result;
+	}
+
+	void ModelImporter::ReadNodeHierarchy(const aiScene* assimpScene, aiNode* assimpNode, shared_ptr<Model>& model, Entity* parentNode, Entity* newEntity)
+	{
+		// Is this the root node?
+		if (!assimpNode->mParent || !newEntity)
+		{
+			newEntity = m_world->Entity_Create().get();
+			model->SetRootentity(newEntity->GetPtrShared());
+
+			int jobCount;
+			AssimpHelper::ComputeNodeCount(assimpNode, &jobCount);
+			ProgressReport::Get().SetJobCount(g_progress_ModelImporter, jobCount);
+		}
+
+		//= GET NODE NAME ==========================================================================================================================
+		// In case this is the root node, aiNode.mName will be "RootNode". 
+		// To get a more descriptive name we instead get the name from the file path.
+		string name = assimpNode->mParent ? assimpNode->mName.C_Str() : FileSystem::GetFileNameNoExtensionFromFilePath(_ModelImporter::m_modelPath);
+		newEntity->SetName(name);
+		ProgressReport::Get().SetStatus(g_progress_ModelImporter, "Creating entity for " + name);
+		//==========================================================================================================================================
 
 		// Set the transform of parentNode as the parent of the newNode's transform
-		Transform* parentTrans = !parentNode.expired() ? parentNode.lock()->GetTransform_PtrRaw() : nullptr;
-		newNode.lock()->GetTransform_PtrRaw()->SetParent(parentTrans);
+		Transform* parentTrans = parentNode ? parentNode->GetTransform_PtrRaw() : nullptr;
+		newEntity->GetTransform_PtrRaw()->SetParent(parentTrans);
 
 		// Set the transformation matrix of the Assimp node to the new node
-		AssimpHelper::SetGameObjectTransform(newNode, assimpNode);
+		AssimpHelper::SetentityTransform(assimpNode, newEntity);
 
 		// Process all the node's meshes
 		for (unsigned int i = 0; i < assimpNode->mNumMeshes; i++)
 		{
-			weak_ptr<GameObject> gameobject = newNode; // set the current gameobject
-			aiMesh* mesh = assimpScene->mMeshes[assimpNode->mMeshes[i]]; // get mesh
-			string name = assimpNode->mName.C_Str(); // get name
+			Entity* entity		= newEntity; // set the current entity
+			aiMesh* assimpMesh	= assimpScene->mMeshes[assimpNode->mMeshes[i]]; // get mesh
+			string name			= assimpNode->mName.C_Str(); // get name
 
-			// if this node has many meshes, then assign a new gameobject for each one of them
+			// if this node has many meshes, then assign a new entity for each one of them
 			if (assimpNode->mNumMeshes > 1)
 			{
-				gameobject = scene->GameObject_CreateAdd(); // create
-				gameobject.lock()->GetTransform_PtrRaw()->SetParent(newNode.lock()->GetTransform_PtrRaw()); // set parent
+				entity = m_world->Entity_Create().get(); // create
+				entity->GetTransform_PtrRaw()->SetParent(newEntity->GetTransform_PtrRaw()); // set parent
 				name += "_" + to_string(i + 1); // set name
 			}
 
-			// Set gameobject name
-			gameobject.lock()->SetName(name);
+			// Set entity name
+			entity->SetName(name);
 
 			// Process mesh
-			LoadMesh(model, mesh, assimpScene, gameobject);
+			LoadMesh(assimpScene, assimpMesh, model, entity);
 		}
 
 		// Process children
 		for (unsigned int i = 0; i < assimpNode->mNumChildren; i++)
 		{
-			weak_ptr<GameObject> child = scene->GameObject_CreateAdd();
-			ReadNodeHierarchy(model, assimpScene, assimpNode->mChildren[i], newNode, child);
+			shared_ptr<Entity> child = m_world->Entity_Create();
+			ReadNodeHierarchy(assimpScene, assimpNode->mChildren[i], model, newEntity, child.get());
 		}
 
-		ProgressReport::Get().JobDone(g_progress_ModelImporter);
+		ProgressReport::Get().IncrementJobsDone(g_progress_ModelImporter);
 	}
 
-	void ModelImporter::ReadAnimations(Model* model, const aiScene* scene)
+	void ModelImporter::ReadAnimations(const aiScene* scene, shared_ptr<Model>& model)
 	{
 		for (unsigned int i = 0; i < scene->mNumAnimations; i++)
 		{
@@ -238,7 +218,7 @@ namespace Directus
 					double time = assimpNodeAnim->mPositionKeys[k].mTime;
 					Vector3 value = AssimpHelper::ToVector3(assimpNodeAnim->mPositionKeys[k].mValue);
 
-					animationNode.positionFrames.push_back(KeyVector{ time, value });
+					animationNode.positionFrames.emplace_back(KeyVector{ time, value });
 				}
 
 				// Rotation keys
@@ -247,7 +227,7 @@ namespace Directus
 					double time = assimpNodeAnim->mPositionKeys[k].mTime;
 					Quaternion value = AssimpHelper::ToQuaternion(assimpNodeAnim->mRotationKeys[k].mValue);
 
-					animationNode.rotationFrames.push_back(KeyQuaternion{ time, value });
+					animationNode.rotationFrames.emplace_back(KeyQuaternion{ time, value });
 				}
 
 				// Scaling keys
@@ -256,7 +236,7 @@ namespace Directus
 					double time = assimpNodeAnim->mPositionKeys[k].mTime;
 					Vector3 value = AssimpHelper::ToVector3(assimpNodeAnim->mScalingKeys[k].mValue);
 
-					animationNode.scaleFrames.push_back(KeyVector{ time, value });
+					animationNode.scaleFrames.emplace_back(KeyVector{ time, value });
 				}
 			}
 
@@ -264,117 +244,124 @@ namespace Directus
 		}
 	}
 
-	void ModelImporter::LoadMesh(Model* model, aiMesh* assimpMesh, const aiScene* assimpScene, const weak_ptr<GameObject>& gameobject)
+	void ModelImporter::LoadMesh(const aiScene* assimpScene, aiMesh* assimpMesh, shared_ptr<Model>& model, Entity* entity_parent)
 	{
-		if (!model || !assimpMesh || !assimpScene || gameobject.expired())
+		if (!model || !assimpMesh || !assimpScene || !entity_parent)
+		{
+			LOG_ERROR_INVALID_PARAMETER();
 			return;
+		}
 
-		//= GEOMETRY =====================================
-		// Create a new Mesh
-		auto mesh = make_shared<Mesh>(m_context);
-		mesh->SetResourceName(assimpMesh->mName.C_Str());
+		// Vertices
+		vector<RHI_Vertex_PosUvNorTan> vertices;
+		{
+			// Pre-allocate for extra performance
+			unsigned int vertexCount = assimpMesh->mNumVertices;
+			vertices.reserve(vertexCount);
+			vertices.resize(vertexCount);
 
-		// Populate mesh with vertices
-		LoadAiMeshVertices(assimpMesh, mesh); 
+			for (unsigned int i = 0; i < vertexCount; i++)
+			{
+				auto& vertex = vertices[i];
 
-		// Populate mesh with indices
-		LoadAiMeshIndices(assimpMesh, mesh); 
+				// Position
+				const aiVector3D& pos = assimpMesh->mVertices[i];
+				vertex.pos[0] = pos.x;
+				vertex.pos[1] = pos.y;
+				vertex.pos[2] = pos.z;
+
+				// Normal
+				if (assimpMesh->mNormals)
+				{
+					const aiVector3D& normal = assimpMesh->mNormals[i];
+					vertex.normal[0] = normal.x;
+					vertex.normal[1] = normal.y;
+					vertex.normal[2] = normal.z;
+				}
+
+				// Tangent
+				if (assimpMesh->mTangents)
+				{
+					const aiVector3D& tangent = assimpMesh->mTangents[i];
+					vertex.tangent[0] = tangent.x;
+					vertex.tangent[1] = tangent.y;
+					vertex.tangent[2] = tangent.z;
+				}
+
+				// Texture coordinates
+				unsigned int uvChannel = 0;
+				if (assimpMesh->HasTextureCoords(uvChannel))
+				{
+					const aiVector3D& texCoords = assimpMesh->mTextureCoords[uvChannel][i];
+					vertex.uv[0] = texCoords.x;
+					vertex.uv[1] = texCoords.y;
+				}
+			}
+		}
+
+		// Indices
+		vector<unsigned int> indices;
+		{
+			// Pre-allocate for extra performance
+			unsigned int indexCount = assimpMesh->mNumFaces * 3;
+			indices.reserve(indexCount);
+			indices.resize(indexCount);
+
+			// Get indices by iterating through each face of the mesh.
+			for (unsigned int faceIndex = 0; faceIndex < assimpMesh->mNumFaces; faceIndex++)
+			{
+				// if (aiPrimitiveType_LINE | aiPrimitiveType_POINT) && aiProcess_Triangulate) then (face.mNumIndices == 3)
+				aiFace& face				= assimpMesh->mFaces[faceIndex];
+				unsigned int indices_index	= (faceIndex * 3);
+				indices[indices_index + 0]	= face.mIndices[0];
+				indices[indices_index + 1]	= face.mIndices[1];
+				indices[indices_index + 2]	= face.mIndices[2];
+			}
+		}
+
+		// Compute AABB (before doing move operation on vertices)
+		BoundingBox aabb = BoundingBox(vertices);
 
 		// Add the mesh to the model
-		model->AddMesh(mesh, gameobject);
-		//================================================
+		unsigned int indexOffset;
+		unsigned int vertexOffset;
+		model->Geometry_Append(move(indices), move(vertices), &indexOffset, &vertexOffset);
 
-		//= MATERIAL ========================================================================
-		auto material = shared_ptr<Material>();
+		// Add a renderable component to this entity
+		auto renderable	= entity_parent->AddComponent<Renderable>();
+
+		// Set the geometry
+		renderable->Geometry_Set(
+			entity_parent->GetName(),
+			indexOffset,
+			(unsigned int)indices.size(),
+			vertexOffset,
+			(unsigned int)vertices.size(),
+			move(aabb),
+			model
+		);
+
+		// Material
 		if (assimpScene->HasMaterials())
 		{
 			// Get aiMaterial
 			aiMaterial* assimpMaterial = assimpScene->mMaterials[assimpMesh->mMaterialIndex];
 			// Convert it and add it to the model
-			model->AddMaterial(AiMaterialToMaterial(model, assimpMaterial), gameobject);
+			model->AddMaterial(AiMaterialToMaterial(assimpMaterial, model), entity_parent->GetPtrShared());
 		}
-		//===================================================================================
 
-		//= BONES ======================================================================
-		for (unsigned int boneIndex = 0; boneIndex < assimpMesh->mNumBones; boneIndex++)
-		{
+		// Bones
+		//for (unsigned int boneIndex = 0; boneIndex < assimpMesh->mNumBones; boneIndex++)
+		//{
 			//aiBone* bone = assimpMesh->mBones[boneIndex];
-		}
-		//==============================================================================
+		//}
 	}
 
-	void ModelImporter::LoadAiMeshIndices(aiMesh* assimpMesh, const shared_ptr<Mesh>& mesh)
-	{
-		// Get indices by iterating through each face of the mesh.
-		for (unsigned int faceIndex = 0; faceIndex < assimpMesh->mNumFaces; faceIndex++)
-		{
-			aiFace face = assimpMesh->mFaces[faceIndex];
-
-			if (face.mNumIndices < 3)
-				continue;
-
-			for (unsigned int j = 0; j < face.mNumIndices; j++)
-			{
-				mesh->GetIndices().emplace_back(face.mIndices[j]);
-			}
-		}
-	}
-
-	void ModelImporter::LoadAiMeshVertices(aiMesh* assimpMesh, const shared_ptr<Mesh>& mesh)
-	{
-		Vector3 position;
-		Vector2 uv;
-		Vector3 normal;
-		Vector3 tangent;
-		Vector3 bitangent;
-
-		mesh->GetVertices().reserve(assimpMesh->mNumVertices);
-
-		for (unsigned int vertexIndex = 0; vertexIndex < assimpMesh->mNumVertices; vertexIndex++)
-		{
-			// Position
-			position = AssimpHelper::ToVector3(assimpMesh->mVertices[vertexIndex]);
-
-			// Normal
-			if (assimpMesh->mNormals)
-			{
-				normal = AssimpHelper::ToVector3(assimpMesh->mNormals[vertexIndex]);
-			}
-
-			// Tangent
-			if (assimpMesh->mTangents)
-			{
-				tangent = AssimpHelper::ToVector3(assimpMesh->mTangents[vertexIndex]);
-			}
-
-			// Bitagent
-			if (assimpMesh->mBitangents)
-			{
-				bitangent = AssimpHelper::ToVector3(assimpMesh->mBitangents[vertexIndex]);
-			}
-
-			// Texture Coordinates
-			if (assimpMesh->HasTextureCoords(0))
-			{
-				uv = AssimpHelper::ToVector2(aiVector2D(assimpMesh->mTextureCoords[0][vertexIndex].x, assimpMesh->mTextureCoords[0][vertexIndex].y));
-			}
-
-			// save the vertex
-			mesh->GetVertices().emplace_back(position, uv, normal, tangent, bitangent);
-
-			// reset the vertex for use in the next loop
-			uv			= Vector2::Zero;
-			normal		= Vector3::Zero;
-			tangent		= Vector3::Zero;
-			bitangent	= Vector3::Zero;
-		}
-	}
-
-	shared_ptr<Material> ModelImporter::AiMaterialToMaterial(Model* model, aiMaterial* assimpMaterial)
+	shared_ptr<Material> ModelImporter::AiMaterialToMaterial(aiMaterial* assimpMaterial, shared_ptr<Model>& model)
 	{
 		if (!model || !assimpMaterial)
 		{
-			LOG_WARNING("ModelImporter::AiMaterialToMaterial(): One of the provided materials is null, can't execute function");
+			LOG_WARNING("One of the provided materials is null, can't execute function");
 			return nullptr;
 		}
 
@@ -384,27 +371,29 @@ namespace Directus
 		aiString name;
 		aiGetMaterialString(assimpMaterial, AI_MATKEY_NAME, &name);
 		material->SetResourceName(name.C_Str());
-		material->SetModelID(GUIDGenerator::ToUnsignedInt(model->GetResourceName()));
 
 		// CULL MODE
 		// Specifies whether meshes using this material must be rendered 
 		// without back face CullMode. 0 for false, !0 for true.
-		bool isTwoSided = false;
-		int result = assimpMaterial->Get(AI_MATKEY_TWOSIDED, isTwoSided);
-		if (result == aiReturn_SUCCESS && isTwoSided)
+		int isTwoSided		= 0;
+		unsigned int max	= 1;
+		if (AI_SUCCESS == aiGetMaterialIntegerArray(assimpMaterial, AI_MATKEY_TWOSIDED, &isTwoSided, &max))
 		{
-			material->SetCullMode(CullNone);
+			if (isTwoSided != 0)
+			{
+				material->SetCullMode(Cull_None);
+			}
 		}
 
 		// DIFFUSE COLOR
 		aiColor4D colorDiffuse(1.0f, 1.0f, 1.0f, 1.0f);
 		aiGetMaterialColor(assimpMaterial, AI_MATKEY_COLOR_DIFFUSE, &colorDiffuse);
-		material->SetColorAlbedo(AssimpHelper::ToVector4(colorDiffuse));
-
+		
 		// OPACITY
 		aiColor4D opacity(1.0f, 1.0f, 1.0f, 1.0f);
 		aiGetMaterialColor(assimpMaterial, AI_MATKEY_OPACITY, &opacity);
-		material->SetOpacity(opacity.r);
+
+		material->SetColorAlbedo(Vector4(colorDiffuse.r, colorDiffuse.g, colorDiffuse.b, opacity.r));
 
 		// TEXTURES
 		auto LoadMatTex = [this, &model, &assimpMaterial, &material](aiTextureType assimpTex, TextureType engineTex)
@@ -412,17 +401,17 @@ namespace Directus
 			aiString texturePath;
 			if (assimpMaterial->GetTextureCount(assimpTex) > 0)
 			{
-				if (assimpMaterial->GetTexture(assimpTex, 0, &texturePath, nullptr, nullptr, nullptr, nullptr, nullptr) == AI_SUCCESS)
+				if (AI_SUCCESS == assimpMaterial->GetTexture(assimpTex, 0, &texturePath))
 				{
-					auto deducedPath = ValidateTexturePath(texturePath.data);
+					auto deducedPath = AssimpHelper::Texture_ValidatePath(texturePath.data, _ModelImporter::m_modelPath);
 					if (FileSystem::IsSupportedImageFile(deducedPath))
 					{
-						model->AddTexture(material, engineTex, ValidateTexturePath(texturePath.data));
+						model->AddTexture(material, engineTex, AssimpHelper::Texture_ValidatePath(texturePath.data, _ModelImporter::m_modelPath));
 					}
 
 					if (assimpTex == aiTextureType_DIFFUSE)
 					{
-						// FIX: materials that have a diffuse texture should not be tinted black/grey
+						// FIX: materials that have a diffuse texture should not be tinted black/gray
 						material->SetColorAlbedo(Vector4::One);
 					}
 				}
@@ -440,82 +429,5 @@ namespace Directus
 		LoadMatTex(aiTextureType_OPACITY,	TextureType_Mask);
 
 		return material;
-	}
-	//============================================================================================
-
-	//= HELPER FUNCTIONS =================================================================================================================================
-	string ModelImporter::ValidateTexturePath(const string& originalTexturePath)
-	{
-		// Models usually return a texture path which is relative to the model's directory.
-		// However, to load anything, we'll need an absolute path, so we construct it here.
-		string modelDir = FileSystem::GetDirectoryFromFilePath(m_modelPath);
-		string fullTexturePath = modelDir + originalTexturePath;
-
-		// 1. Check if the texture path is valid
-		if (FileSystem::FileExists(fullTexturePath))
-			return fullTexturePath;
-
-		// 2. Check the same texture path as previously but 
-		// this time with different file extensions (jpg, png and so on).
-		fullTexturePath = TryPathWithMultipleExtensions(fullTexturePath);
-		if (FileSystem::FileExists(fullTexturePath))
-			return fullTexturePath;
-
-		// At this point we know the provided path is wrong, we will make a few guesses.
-		// The most common mistake is that the artist provided a path which is absolute to his computer.
-
-		// 3. Check if the texture is in the same folder as the model
-		fullTexturePath = modelDir + FileSystem::GetFileNameFromFilePath(fullTexturePath);
-		if (FileSystem::FileExists(fullTexturePath))
-			return fullTexturePath;
-
-		// 4. Check the same texture path as previously but 
-		// this time with different file extensions (jpg, png and so on).
-		fullTexturePath = TryPathWithMultipleExtensions(fullTexturePath);
-		if (FileSystem::FileExists(fullTexturePath))
-			return fullTexturePath;
-
-		// Give up, no valid texture path was found
-		return NOT_ASSIGNED;
-	}
-
-	string ModelImporter::TryPathWithMultipleExtensions(const string& filePath)
-	{
-		// Remove extension
-		string filePathNoExt = FileSystem::GetFilePathWithoutExtension(filePath);
-
-		// Check if the file exists using all engine supported extensions
-		auto supportedFormats = FileSystem::GetSupportedImageFormats();
-		for (unsigned int i = 0; i < supportedFormats.size(); i++)
-		{
-			string newFilePath = filePathNoExt + supportedFormats[i];
-			string newFilePathUpper = filePathNoExt + FileSystem::ConvertToUppercase(supportedFormats[i]);
-
-			if (FileSystem::FileExists(newFilePath))
-			{
-				return newFilePath;
-			}
-
-			if (FileSystem::FileExists(newFilePathUpper))
-			{
-				return newFilePathUpper;
-			}
-		}
-
-		return filePath;
-	}
-
-	void ModelImporter::ComputeNodeCount(aiNode* node, int* count)
-	{
-		if (!node)
-			return;
-
-		(*count)++;
-
-		// Process children
-		for (unsigned int i = 0; i < node->mNumChildren; i++)
-		{
-			ComputeNodeCount(node->mChildren[i], count);
-		}
 	}
 }

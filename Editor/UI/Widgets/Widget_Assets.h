@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,9 +31,8 @@ class FileDialog;
 class Widget_Assets : public Widget
 {
 public:
-	Widget_Assets();
-	void Initialize(Directus::Context* context) override;
-	void Update() override;
+	Widget_Assets(Directus::Context* context);
+	void Tick(float deltaTime) override;
 
 private:
 	void OnPathClicked(const std::string& path);

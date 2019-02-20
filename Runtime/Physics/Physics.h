@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,10 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
 
 //= INCLUDES =================
-#include "../Core/SubSystem.h"
-#include <memory>
+#include "../Core/ISubsystem.h"
 //============================
 
-class btCollisionShape;
-class btVector3;
 class btBroadphaseInterface;
-class btRigidBody;
-class btTypedConstraint;
 class btCollisionDispatcher;
 class btConstraintSolver;
 class btDefaultCollisionConfiguration;
@@ -38,17 +33,17 @@ class btDiscreteDynamicsWorld;
 
 namespace Directus
 {
+	class Renderer;
 	class Variant;
-	class RigidBody;
-	class Collider;
-	class Constraint;
 	class PhysicsDebugDraw;
+	class Profiler;
+
 	namespace Math
 	{
 		class Vector3;
 	}	
 
-	class Physics : public Subsystem
+	class Physics : public ISubsystem
 	{
 	public:
 		Physics(Context* context);
@@ -56,33 +51,28 @@ namespace Directus
 
 		//= Subsystem =============
 		bool Initialize() override;
+		void Tick() override;
 		//=========================
-
-		// Step the world
-		void Step(const Variant& deltaTime);
-		// Remove everything from the world
-		void Clear();
-		// Draw debug geometry
-		void DebugDraw();
-		// Return the world
-		std::shared_ptr<btDiscreteDynamicsWorld> GetWorld() { return m_world; }
-		// Return the world's gravity
+	
 		Math::Vector3 GetGravity();
-
-		PhysicsDebugDraw* GetPhysicsDebugDraw() { return m_debugDraw.get(); }
-		bool IsSimulating() { return m_simulating; }
+		btDiscreteDynamicsWorld* GetWorld()		{ return m_world; }
+		PhysicsDebugDraw* GetPhysicsDebugDraw() { return m_debugDraw; }
+		bool IsSimulating()						{ return m_simulating; }
 
 	private:
-		std::unique_ptr<btBroadphaseInterface> m_broadphase;
-		std::unique_ptr<btCollisionDispatcher> m_dispatcher;
-		std::unique_ptr<btConstraintSolver> m_constraintSolver;
-		std::unique_ptr<btDefaultCollisionConfiguration> m_collisionConfiguration;
-		std::shared_ptr<btDiscreteDynamicsWorld> m_world;
-		std::shared_ptr<PhysicsDebugDraw> m_debugDraw;
+		btBroadphaseInterface* m_broadphase;
+		btCollisionDispatcher* m_dispatcher;
+		btConstraintSolver* m_constraintSolver;
+		btDefaultCollisionConfiguration* m_collisionConfiguration;
+		btDiscreteDynamicsWorld* m_world;
+		PhysicsDebugDraw* m_debugDraw;
 
 		//= PROPERTIES ===
 		int m_maxSubSteps;
 		bool m_simulating;
 		//================
+
+		Renderer* m_renderer;
+		Profiler* m_profiler;
 	};
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,44 +21,23 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 //= INCLUDES =================================
 #include "Scripting.h"
-#include <angelscript.h>
-#include <scriptstdstring/scriptstdstring.h>
 #include <scriptstdstring/scriptstdstring.cpp>
 #include "ScriptInterface.h"
-#include "Module.h"
 #include "../Logging/Log.h"
 #include "../FileSystem/FileSystem.h"
-#include "../Core/Context.h"
 #include "../Core/EventSystem.h"
 #include "../Core/Settings.h"
 //===========================================
 
 namespace Directus
 {
-	Scripting::Scripting(Context* context) : Subsystem(context)
-	{
-		m_scriptEngine = nullptr;
-		SUBSCRIBE_TO_EVENT(EVENT_SCENE_CLEARED, EVENT_HANDLER(Clear));
-	}
-
-	Scripting::~Scripting()
-	{
-		Clear();
-
-		if (m_scriptEngine)
-		{
-			m_scriptEngine->ShutDownAndRelease();
-			m_scriptEngine = nullptr;
-		}
-	}
-
-	bool Scripting::Initialize()
+	Scripting::Scripting(Context* context) : ISubsystem(context)
 	{
 		m_scriptEngine = asCreateScriptEngine(ANGELSCRIPT_VERSION);
 		if (!m_scriptEngine)
 		{
-			LOG_ERROR("Failed to create AngelScript engine.");
-			return false;
+			LOG_ERROR("Failed to create AngelScript engine");
+			return;
 		}
 
 		// Register the string type
@@ -73,14 +52,25 @@ namespace Directus
 
 		m_scriptEngine->SetEngineProperty(asEP_BUILD_WITHOUT_LINE_CUES, true);
 
-		// Log version
+		// Get version
 		string major	= to_string(ANGELSCRIPT_VERSION).erase(1, 4);
 		string minor	= to_string(ANGELSCRIPT_VERSION).erase(0, 1).erase(2, 2);
 		string rev		= to_string(ANGELSCRIPT_VERSION).erase(0, 3);
-		Settings::Get().g_versionAngelScript = major + "." + minor + "." + rev;
-		LOG_INFO("Scripting: AngelScript " + Settings::Get().g_versionAngelScript);
+		Settings::Get().m_versionAngelScript = major + "." + minor + "." + rev;
 
-		return true;
+		// Subscribe to events
+		SUBSCRIBE_TO_EVENT(Event_World_Unload, EVENT_HANDLER(Clear));
+	}
+
+	Scripting::~Scripting()
+	{
+		Clear();
+
+		if (m_scriptEngine)
+		{
+			m_scriptEngine->ShutDownAndRelease();
+			m_scriptEngine = nullptr;
+		}
 	}
 
 	void Scripting::Clear()
@@ -124,6 +114,11 @@ namespace Directus
 	// it will be inserted back in the pool for re-use
 	void Scripting::ReturnContext(asIScriptContext* context)
 	{
+		if (!context)
+		{
+			LOG_ERROR("Scripting::ReturnContext: Context is null");
+			return;
+		}
 		m_contexts.push_back(context);
 		context->Unprepare();
 	}
@@ -166,7 +161,7 @@ namespace Directus
 	void Scripting::LogExceptionInfo(asIScriptContext* ctx)
 	{
 		string exceptionDescription = ctx->GetExceptionString(); // get the exception that occurred
-		const asIScriptFunction* function = ctx->GetExceptionFunction(); // get the function where the exception occured
+		const asIScriptFunction* function = ctx->GetExceptionFunction(); // get the function where the exception occurred
 
 		string functionDecleration = function->GetDeclaration();
 		string moduleName = function->GetModuleName();
@@ -174,7 +169,7 @@ namespace Directus
 		string scriptFile = FileSystem::GetFileNameFromFilePath(scriptPath);
 		string exceptionLine = to_string(ctx->GetExceptionLineNumber());
 
-		LOG_ERROR(exceptionDescription + ", at line " + exceptionLine + ", in function " + functionDecleration + ", in script " + scriptFile);
+		LOGF_ERROR("%s, at line %s, in function %s, in script %s", exceptionDescription.c_str(), exceptionLine.c_str(), functionDecleration.c_str(), scriptFile.c_str());
 	}
 
 	// This is used for AngelScript error messages

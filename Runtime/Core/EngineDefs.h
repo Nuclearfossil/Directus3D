@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,9 +31,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma warning(disable: 4275) // https://msdn.microsoft.com/en-us/library/3tdb471s.aspx
 //===============================================================================================
 
-#ifdef COMPILING_LIB
+#ifdef ENGINE_RUNTIME
 #define ENGINE_CLASS __declspec(dllexport)
-#else
+#elif ENGINE_EDITOR
 #define ENGINE_CLASS __declspec(dllimport)
 #endif
 
@@ -41,6 +41,16 @@ namespace Directus
 {
 	template <typename T>
 	void SafeRelease(T& ptr)
+	{
+		if (ptr)
+		{
+			ptr->Release();
+			ptr = nullptr;
+		}
+	}
+
+	template <typename T>
+	void SafeRelease(T* ptr)
 	{
 		if (ptr)
 		{

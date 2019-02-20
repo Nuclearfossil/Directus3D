@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,36 +21,42 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =======
+//= INCLUDES ==================
+#include "../Core/EngineDefs.h"
+#include <vector>
 #include "Vector3.h"
-//==================
+//=============================
 
-namespace Directus::Math
+namespace Directus
 {
-	class BoundingBox;
+	class Context;
 
-	class ENGINE_CLASS Ray
+	namespace Math
 	{
-	public:
-		// Constructs a ray with zero origin and direction
-		Ray();
+		class RayHit;
+		class BoundingBox;
 
-		// Construct from origin and direction. The direction will be normalized.
-		Ray(const Vector3& origin, const Vector3& end);
+		class ENGINE_CLASS Ray
+		{
+		public:
+			Ray();
+			Ray(const Vector3& start, const Vector3& end);
+			~Ray();
 
-		// Empty destructor
-		~Ray();
+			// Traces a ray against all entities in the world, returns all hits in a vector.
+			std::vector<RayHit> Trace(Context* context);
 
-		// Returns hit distance to a bounding box, or infinity if there is no hit.
-		float HitDistance(const BoundingBox& box);
+			// Returns hit distance to a bounding box, or infinity if there is no hit.
+			float HitDistance(const BoundingBox& box);
 
-		Vector3 GetOrigin() { return m_origin; }
-		Vector3 GetEnd() { return m_end; }
-		Vector3 GetDirection() { return m_direction; }
+			const Vector3& GetStart() const		{ return m_start; }
+			const Vector3& GetEnd()	const		{ return m_end; }
+			const Vector3& GetDirection() const { return m_direction; }
 
-	private:
-		Vector3 m_origin;
-		Vector3 m_end;
-		Vector3 m_direction;
-	};
+		private:
+			Vector3 m_start;
+			Vector3 m_end;
+			Vector3 m_direction;
+		};
+	}
 }

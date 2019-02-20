@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,12 +19,15 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ================
+//= INCLUDES ===========
 #include "BoundingBox.h"
-#include "../Graphics/Mesh.h"
-#include "MathHelper.h"
 #include "Matrix.h"
-//===========================
+#include "Vector3.h"
+//======================
+
+//= NAMESPACES ========================
+using namespace Directus::Math::Helper;
+//=====================================
 
 namespace Directus::Math
 {
@@ -32,43 +35,38 @@ namespace Directus::Math
 
 	BoundingBox::BoundingBox()
 	{
-		min = Vector3::Infinity;
-		max = Vector3::InfinityNeg;
+		m_min = Vector3::Infinity;
+		m_max = Vector3::InfinityNeg;
 	}
 
 	BoundingBox::BoundingBox(const Vector3& min, const Vector3& max)
 	{
-		this->min = min;
-		this->max = max;
+		this->m_min = min;
+		this->m_max = max;
 	}
 
-	BoundingBox::~BoundingBox()
+	BoundingBox::BoundingBox(const std::vector<RHI_Vertex_PosUvNorTan>& vertices)
 	{
-
-	}
-
-	void BoundingBox::ComputeFromVertices(const std::vector<VertexPosTexTBN>& vertices)
-	{
-		min = Vector3::Infinity;
-		max = Vector3::InfinityNeg;
+		m_min = Vector3::Infinity;
+		m_max = Vector3::InfinityNeg;
 
 		for (const auto& vertex : vertices)
 		{
-			max.x = Max(max.x, vertex.position[0]);
-			max.y = Max(max.y, vertex.position[1]);
-			max.z = Max(max.z, vertex.position[2]);
+			m_max.x = Max(m_max.x, vertex.pos[0]);
+			m_max.y = Max(m_max.y, vertex.pos[1]);
+			m_max.z = Max(m_max.z, vertex.pos[2]);
 
-			min.x = Min(min.x, vertex.position[0]);
-			min.y = Min(min.y, vertex.position[1]);
-			min.z = Min(min.z, vertex.position[2]);
+			m_min.x = Min(m_min.x, vertex.pos[0]);
+			m_min.y = Min(m_min.y, vertex.pos[1]);
+			m_min.z = Min(m_min.z, vertex.pos[2]);
 		}
 	}
 
 	Intersection BoundingBox::IsInside(const Vector3& point) const
 	{
-		if (point.x < min.x || point.x > max.x ||
-			point.y < min.y || point.y > max.y ||
-			point.z < min.z || point.z > max.z)
+		if (point.x < m_min.x || point.x > m_max.x ||
+			point.y < m_min.y || point.y > m_max.y ||
+			point.z < m_min.z || point.z > m_max.z)
 		{
 			return Outside;
 		}
@@ -80,16 +78,16 @@ namespace Directus::Math
 
 	Intersection BoundingBox::IsInside(const BoundingBox& box) const
 	{
-		if (box.max.x < min.x || box.min.x > max.x ||
-			box.max.y < min.y || box.min.y > max.y ||
-			box.max.z < min.z || box.min.z > max.z)
+		if (box.m_max.x < m_min.x || box.m_min.x > m_max.x ||
+			box.m_max.y < m_min.y || box.m_min.y > m_max.y ||
+			box.m_max.z < m_min.z || box.m_min.z > m_max.z)
 		{
 			return Outside;
 		}
 		else if (
-				box.min.x < min.x || box.max.x > max.x ||
-				box.min.y < min.y || box.max.y > max.y ||
-				box.min.z < min.z || box.max.z > max.z)
+				box.m_min.x < m_min.x || box.m_max.x > m_max.x ||
+				box.m_min.y < m_min.y || box.m_max.y > m_max.y ||
+				box.m_min.z < m_min.z || box.m_max.z > m_max.z)
 		{
 			return Intersects;
 		}
@@ -115,11 +113,11 @@ namespace Directus::Math
 
 	void BoundingBox::Merge(const BoundingBox& box)
 	{
-		if (box.min.x < min.x) min.x = box.min.x;
-		if (box.min.y < min.y) min.y = box.min.y;
-		if (box.min.z < min.z) min.z = box.min.z;
-		if (box.max.x > max.x) max.x = box.max.x;
-		if (box.max.y > max.y) max.y = box.max.y;
-		if (box.max.z > max.z) max.z = box.max.z;
+		m_min.x = Min(m_min.x, box.m_min.x);
+		m_min.y = Min(m_min.y, box.m_min.y);
+		m_min.z = Min(m_min.z, box.m_min.z);
+		m_max.x = Max(m_max.x, box.m_max.x);
+		m_max.y = Max(m_max.x, box.m_max.x);
+		m_max.z = Max(m_max.x, box.m_max.x);
 	}
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -32,22 +32,7 @@ struct FT_FaceRec_;
 namespace Directus
 {
 	class Context;
-
-	struct Glyph
-	{
-		int xLeft;
-		int xRight;
-		int yTop;
-		int yBottom;
-		int width;
-		int height;
-		float uvXLeft;
-		float uvXRight;
-		float uvYTop;
-		float uvYBottom;
-		int descent;
-		int horizontalOffset;
-	};
+	struct Glyph;
 
 	class ENGINE_CLASS FontImporter
 	{
@@ -55,8 +40,7 @@ namespace Directus
 		FontImporter(Context* context);
 		~FontImporter();
 
-		void Initialize();
-		bool LoadFont(const std::string& filePath, int fontSize, std::vector<std::byte>& atlasBuffer, unsigned int& atlasWidth, unsigned int& atlasHeight, std::map<unsigned int, Glyph>& characterInfo);
+		bool LoadFromFile(const std::string& filePath, int fontSize, std::vector<std::byte>& atlasBuffer, unsigned int& atlasWidth, unsigned int& atlasHeight, std::map<unsigned int, Glyph>& characterInfo);
 
 	private:
 		void ComputeAtlasTextureDimensions(FT_FaceRec_* face, unsigned int& atlasWidth, unsigned int& atlasHeight, unsigned int& rowHeight);

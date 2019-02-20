@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@ namespace Directus
 	class Module
 	{
 	public:
-		Module(const std::string& moduleName, Scripting* scriptEngine);
+		Module(const std::string& moduleName, std::weak_ptr<Scripting> scriptEngine);
 		~Module();
 
 		bool LoadScript(const std::string& filePath);
@@ -44,7 +44,7 @@ namespace Directus
 
 	private:
 		std::string m_moduleName;
-		CScriptBuilder* m_builder;
-		Scripting* m_scriptEngine;
+		std::unique_ptr<CScriptBuilder> m_scriptBuilder;
+		std::weak_ptr<Scripting> m_scriptEngine;
 	};
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -40,9 +40,8 @@ namespace Directus
 		void RegisterSettings();
 		void RegisterInput();
 		void RegisterTime();
-		void RegisterGameObject();
+		void RegisterEntity();
 		void RegisterTransform();
-		void RegisterRenderable();
 		void RegisterMaterial();
 		void RegisterCamera();
 		void RegisterRigidBody();
@@ -51,7 +50,7 @@ namespace Directus
 		void RegisterVector3();
 		void RegisterQuaternion();
 		void RegisterMath();
-		void RegisterDebug();
+		void RegisterLog();
 
 		asIScriptEngine* m_scriptEngine;
 		Context* m_context;

@@ -1,5 +1,5 @@
 ﻿/*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,18 +19,20 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES =====================
+//= INCLUDES ==========================
 #include "FontImporter.h"
 #include "ft2build.h"
-#include FT_FREETYPE_H  
+#include FT_FREETYPE_H 
 #include "../../Logging/Log.h"
 #include "../../Math/MathHelper.h"
 #include "../../Core/Settings.h"
-//================================
+#include "../../Rendering/Font/Glyph.h"
+//=====================================
 
 //= NAMESPACES ================
 using namespace std;
 using namespace Directus::Math;
+using namespace Helper;
 //=============================
 
 // A minimum size for a texture holding all visible ASCII characters
@@ -45,6 +47,18 @@ namespace Directus
 	FontImporter::FontImporter(Context* context)
 	{
 		m_context = context;
+
+		if (FT_Init_FreeType(&m_library))
+		{
+			LOG_ERROR("FreeType: Failed to initialize.");
+		}
+
+		// Get version
+		FT_Int major;
+		FT_Int minor;
+		FT_Int rev;
+		FT_Library_Version(m_library, &major, &minor, &rev);
+		Settings::Get().m_versionFreeType = to_string(major) + "." + to_string(minor) + "." + to_string(rev);
 	}
 
 	FontImporter::~FontImporter()
@@ -52,55 +66,7 @@ namespace Directus
 		FT_Done_FreeType(m_library);
 	}
 
-	void FontImporter::Initialize()
-	{
-		if (FT_Init_FreeType(&m_library))
-		{
-			LOG_ERROR("FreeType: Failed to initialize.");
-		}
-
-		// Log version
-		FT_Int major;
-		FT_Int minor;
-		FT_Int rev;
-		FT_Library_Version(m_library, &major, &minor, &rev);
-		Settings::Get().g_versionFreeType = to_string(major) + "." + to_string(minor) + "." + to_string(rev);
-		LOG_INFO("FontImporter: FreeType " + Settings::Get().g_versionFreeType);
-	}
-
-	// Glyph metrics:
-	// --------------
-	//
-	//                       xmin                     xmax
-	//                        |                         |
-	//                        |<-------- width -------->|
-	//                        |                         |
-	//              |         +-------------------------+----------------- ymax
-	//              |         |    ggggggggg   ggggg    |     ^        ^
-	//              |         |   g:::::::::ggg::::g    |     |        |
-	//              |         |  g:::::::::::::::::g    |     |        |
-	//              |         | g::::::ggggg::::::gg    |     |        |
-	//              |         | g:::::g     g:::::g     |     |        |
-	//    offsetX  -|-------->| g:::::g     g:::::g     |  offsetY     |
-	//              |         | g:::::g     g:::::g     |     |        |
-	//              |         | g::::::g    g:::::g     |     |        |
-	//              |         | g:::::::ggggg:::::g     |     |        |
-	//              |         |  g::::::::::::::::g     |     |      height
-	//              |         |   gg::::::::::::::g     |     |        |
-	//  baseline ---*---------|---- gggggggg::::::g-----*--------      |
-	//            / |         |             g:::::g     |              |
-	//     origin   |         | gggggg      g:::::g     |              |
-	//              |         | g:::::gg   gg:::::g     |              |
-	//              |         |  g::::::ggg:::::::g     |              |
-	//              |         |   gg:::::::::::::g      |              |
-	//              |         |     ggg::::::ggg        |              |
-	//              |         |         gggggg          |              v
-	//              |         +-------------------------+----------------- ymin
-	//              |                                   |
-	//              |------------- advanceX ----------->|
-
-
-	bool FontImporter::LoadFont(const string& filePath, int size, vector<std::byte>& atlasBuffer, unsigned int& atlasWidth, unsigned int& atlasHeight, map<unsigned int, Glyph>& glyphs)
+	bool FontImporter::LoadFromFile(const string& filePath, int size, vector<std::byte>& atlasBuffer, unsigned int& atlasWidth, unsigned int& atlasHeight, map<unsigned int, Glyph>& glyphs)
 	{
 		FT_Face face;
 
@@ -155,14 +121,15 @@ namespace Directus
 				penY += rowHeight;
 			}
 
-			auto bytes = (std::byte*)bitmap->buffer;
+			auto bytes	= (byte*)bitmap->buffer;
+			int	pitch	= bitmap->pitch;
 			for (unsigned int row = 0; row < bitmap->rows; row++)
 			{
 				for (unsigned int col = 0; col < bitmap->width; col++)
 				{
 					int x = penX + col;
 					int y = penY + row;
-					atlasBuffer[y * atlasWidth + x] = bytes[row * bitmap->pitch + col];
+					atlasBuffer[y * atlasWidth + x] = bytes[row * pitch + col];
 				}
 			}
 

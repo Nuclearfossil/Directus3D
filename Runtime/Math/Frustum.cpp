@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,20 +21,15 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 //= INCLUDES =======
 #include "Frustum.h"
+#include "Plane.h"
 //==================
+
+//= NAMESPACES ========================
+using namespace Directus::Math::Helper;
+//=====================================
 
 namespace Directus::Math
 {
-	Frustum::Frustum()
-	{
-
-	}
-
-	Frustum::~Frustum()
-	{
-
-	}
-
 	void Frustum::Construct(const Matrix& mView, const Matrix& mProjection, float screenDepth)
 	{
 		// Calculate the minimum Z distance in the frustum.

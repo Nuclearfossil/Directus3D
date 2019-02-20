@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 namespace Directus
 {
-	class GameObject;
+	class Entity;
 	class Transform;
 	class Light;
 	class Renderable;
@@ -43,30 +43,40 @@ namespace Directus
 	class IComponent;
 }
 
+class ButtonColorPicker;
+
 class Widget_Properties : public Widget
 {
 public:
-	Widget_Properties();
-	void Initialize(Directus::Context* context) override;
-	void Update() override;
+	Widget_Properties(Directus::Context* context);
+	void Tick(float deltaTime) override;
 
-	static void Inspect(std::weak_ptr<Directus::GameObject> gameObject);
+	static void Inspect(std::weak_ptr<Directus::Entity> entity);
 	static void Inspect(std::weak_ptr<Directus::Material> material);
 
-private:
-	void ShowTransform(Directus::Transform* transform);
-	void ShowLight(Directus::Light* light);
-	void ShowRenderable(Directus::Renderable* renderable);
-	void ShowRigidBody(Directus::RigidBody* rigidBody);
-	void ShowCollider(Directus::Collider* collider);
-	void ShowConstraint(Directus::Constraint* constraint);
-	void ShowMaterial(Directus::Material* material);
-	void ShowCamera(Directus::Camera* camera);
-	void ShowAudioSource(Directus::AudioSource* audioSource);
-	void ShowAudioListener(Directus::AudioListener* audioListener);
-	void ShowScript(Directus::Script* script);
+	// Inspected resources
+	static std::weak_ptr<Directus::Entity> m_inspectedentity;
+	static std::weak_ptr<Directus::Material> m_inspectedMaterial;
 
-	void ComponentContextMenu_Options(const char* id, Directus::IComponent* component);
+private:
+	void ShowTransform(std::shared_ptr<Directus::Transform>& transform);
+	void ShowLight(std::shared_ptr<Directus::Light>& light);
+	void ShowRenderable(std::shared_ptr<Directus::Renderable>& renderable);
+	void ShowRigidBody(std::shared_ptr<Directus::RigidBody>& rigidBody);
+	void ShowCollider(std::shared_ptr<Directus::Collider>& collider);
+	void ShowConstraint(std::shared_ptr<Directus::Constraint>& constraint);
+	void ShowMaterial(std::shared_ptr<Directus::Material>& material);
+	void ShowCamera(std::shared_ptr<Directus::Camera>& camera);
+	void ShowAudioSource(std::shared_ptr<Directus::AudioSource>& audioSource);
+	void ShowAudioListener(std::shared_ptr<Directus::AudioListener>& audioListener);
+	void ShowScript(std::shared_ptr<Directus::Script>& script);
+
 	void ShowAddComponentButton();
 	void ComponentContextMenu_Add();
+	void Drop_AutoAddComponents();
+
+	// Color pickers
+	std::unique_ptr<ButtonColorPicker> m_colorPicker_material;
+	std::unique_ptr<ButtonColorPicker> m_colorPicker_light;
+	std::unique_ptr<ButtonColorPicker> m_colorPicker_camera;
 };

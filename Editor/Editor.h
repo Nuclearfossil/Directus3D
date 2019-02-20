@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,30 +21,47 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ====
+//= INCLUDES ==================
 #include <vector>
 #include <memory>
-//===============
+#include "RHI/RHI_Definition.h"
+//=============================
 
-struct ImGuiContext;
+//= FORWARD DECLARATIONS =
 class Widget;
-namespace Directus {class Context;}
+namespace Directus 
+{
+	class Context; 
+	class Engine;
+	class Renderer;
+	class Timer;
+}
+//========================
 
 class Editor
 {
 public:
-	Editor();
+	Editor(void* windowHandle, void* windowInstance, int windowWidth, int windowHeight);
 	~Editor();
 
-	void Initialize(Directus::Context* context);
-	void Resize();
-	void Update();
-	void Shutdown();
+	void Resize(unsigned int width, unsigned int height);
+	void Tick();
 
 private:
-	void DrawEditor();
+	void Widgets_Create();
+	void Widgets_Tick();
+	void DockSpace_Begin();
+	void DockSpace_End();	
 	void ApplyStyle();
 
+	// Editor
 	std::vector<std::unique_ptr<Widget>> m_widgets;
-	Directus::Context* m_context;
+	bool m_initialized = false;
+
+	// Engine
+	std::unique_ptr<Directus::Engine> m_engine;
+	std::shared_ptr<Directus::RHI_Device> m_rhiDevice;
+	Directus::Context* m_context	= nullptr;
+	Directus::Renderer* m_renderer	= nullptr;	
+	Directus::Timer* m_timer		= nullptr;
 };

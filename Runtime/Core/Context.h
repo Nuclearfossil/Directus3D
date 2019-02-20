@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,37 +21,71 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =========
-#include "SubSystem.h"
+//= INCLUDES ==============
 #include <vector>
-//====================
+#include "EngineDefs.h"
+#include "ISubsystem.h"
+#include "../Logging/Log.h"
+//=========================
 
 namespace Directus
 {
+	#define ValidateSubsystemType(T) static_assert(std::is_base_of<ISubsystem, T>::value, "Provided type does not implement ISubystem")
+
 	class ENGINE_CLASS Context
 	{
 	public:
-		Context();
-		~Context();
+		Context() {}
+		~Context() { m_subsystems.clear(); }
 
 		// Register a subsystem
-		void RegisterSubsystem(Subsystem* subsystem);
-
-		// Get a subsystem
-		template <class T> T* GetSubsystem();
-	private:
-		std::vector<Subsystem*> m_subsystems;
-	};
-
-	template <class T>
-	T* Context::GetSubsystem()
-	{
-		for (const auto& subsystem : m_subsystems)
+		template <class T>
+		void RegisterSubsystem()
 		{
-			if (typeid(T) == typeid(*subsystem))
-				return static_cast<T*>(subsystem);
+			ValidateSubsystemType(T);
+			m_subsystems.emplace_back(std::make_shared<T>(this));
 		}
 
-		return nullptr;
-	}
+		// Initialize subsystems
+		bool Initialize()
+		{
+			bool result = true;
+			for (const auto& subsystem : m_subsystems)
+			{
+				if (!subsystem->Initialize())
+				{
+					LOGF_ERROR("Failed to initialize %s", typeid(*subsystem).name());
+					result = false;
+				}
+			}
+
+			return result;
+		}
+
+		// Tick subsystems
+		void Tick()
+		{
+			for (const auto& subsystem : m_subsystems)
+			{
+				subsystem->Tick();
+			}
+		}
+
+		// Get a subsystem
+		template <class T> 
+		std::shared_ptr<T> GetSubsystem()
+		{
+			ValidateSubsystemType(T);
+			for (const auto& subsystem : m_subsystems)
+			{
+				if (typeid(T) == typeid(*subsystem))
+					return std::static_pointer_cast<T>(subsystem);
+			}
+
+			return nullptr;
+		}
+
+	private:
+		std::vector<std::shared_ptr<ISubsystem>> m_subsystems;
+	};
 }

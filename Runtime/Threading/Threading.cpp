@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,19 +19,27 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ==============
+//= INCLUDES ================
 #include "Threading.h"
-//=========================
+#include "../Core/Settings.h"
+//===========================
 
-//= NAMESPACES ======
-using namespace  std;
-//===================
+//= NAMESPACES =====
+using namespace std;
+//==================
 
 namespace Directus
 {
-	Threading::Threading(Context* context) : Subsystem(context)
+	Threading::Threading(Context* context) : ISubsystem(context)
 	{
-		m_stopping = false;
+		m_stopping		= false;
+		m_threadCount	= Settings::Get().ThreadCountMax_Get() - 1;
+
+		for (unsigned int i = 0; i < m_threadCount; i++)
+		{
+			m_threads.emplace_back(thread(&Threading::Invoke, this));
+		}
+		LOGF_INFO("%d threads have been created", m_threadCount);
 	}
 
 	Threading::~Threading()
@@ -56,16 +64,6 @@ namespace Directus
 
 		// Empty worker threads.
 		m_threads.clear();
-	}
-
-	bool Threading::Initialize()
-	{
-		for (int i = 0; i < m_threadCount; i++)
-		{
-			m_threads.emplace_back(thread(&Threading::Invoke, this));
-		}
-
-		return true;
 	}
 
 	void Threading::Invoke()

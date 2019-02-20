@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@ class asIScriptFunction;
 
 namespace Directus
 {
-	class GameObject;
+	class Entity;
 
 	// Allows creation of a script instance and execution of it's class functions.
 	class ScriptInstance
@@ -40,8 +40,8 @@ namespace Directus
 		ScriptInstance();
 		~ScriptInstance();
 
-		bool Instantiate(const std::string& path, std::weak_ptr<GameObject> gameObject, Scripting* scriptEngine);
-		bool IsInstantiated() { return m_isInstantiated; }
+		bool Instantiate(const std::string& path, std::weak_ptr<Entity> entity, std::shared_ptr<Scripting> scriptEngine);
+		bool IsInstantiated()		{ return m_isInstantiated; }
 		std::string GetScriptPath() { return m_scriptPath; }
 
 		void ExecuteStart();
@@ -54,13 +54,13 @@ namespace Directus
 		std::string m_className;
 		std::string m_constructorDeclaration;
 		std::string m_moduleName;
-		std::weak_ptr<GameObject> m_gameObject;
+		std::weak_ptr<Entity> m_entity;
 		std::shared_ptr<Module> m_module;
-		asIScriptObject* m_scriptObject;
-		asIScriptFunction* m_constructorFunction;
-		asIScriptFunction* m_startFunction;
-		asIScriptFunction* m_updateFunction;
-		bool m_isInstantiated;
-		Scripting* m_scriptEngine;
+		asIScriptObject* m_scriptObject				= nullptr;
+		asIScriptFunction* m_constructorFunction	= nullptr;
+		asIScriptFunction* m_startFunction			= nullptr;
+		asIScriptFunction* m_updateFunction			= nullptr;
+		std::shared_ptr<Scripting> m_scriptEngine	= nullptr;
+		bool m_isInstantiated						= false;
 	};
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2018 Panos Karabelas
+Copyright(c) 2016-2019 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
 
 //= INCLUDES =================
-#include "../Core/SubSystem.h"
+#include "../Core/ISubsystem.h"
 //============================
 
 //= FORWARD DECLARATIONS =
@@ -35,18 +35,18 @@ namespace FMOD
 namespace Directus
 {
 	class Transform;
+	class Profiler;
 
-	class Audio : public Subsystem
+	class Audio : public ISubsystem
 	{
 	public:
 		Audio(Context* context);
 		~Audio();
 
-		// SUBSYSTEM =============
-		bool Initialize() override;
-		//========================
+		//= ISubsystem ======
+		void Tick() override;
+		//===================
 
-		bool Update();
 		FMOD::System* GetSystemFMOD() { return m_systemFMOD; }
 		void SetListenerTransform(Transform* transform);
 
@@ -56,8 +56,9 @@ namespace Directus
 		int m_resultFMOD;
 		FMOD::System* m_systemFMOD;
 		int m_maxChannels;
-		float m_distanceFactor;
+		float m_distanceFentity;
 		bool m_initialized;
 		Transform* m_listener;
+		Profiler* m_profiler;
 	};
 }
