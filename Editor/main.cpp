@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,31 +19,30 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES =====================================
+//= INCLUDES ======
 #include "Window.h"
 #include "Editor.h"
-#include "ImGui/Implementation/imgui_impl_win32.h"
-//================================================
+//=================
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
-	std::unique_ptr<Editor> editor;
+    // Create editor
+    Editor editor;
 
-	// Create window
-	Window::g_OnMessage = ImGui_ImplWin32_WndProcHandler;
-	Window::g_onResize	= [&editor](unsigned int width, unsigned int height) { editor->Resize(width, height); };
-	Window::Create(hInstance, "Directus " + std::string(ENGINE_VERSION));	
-	Window::Show();
+    // Create window
+    Window::Create(hInstance, "Spartan " + std::string(sp_version));
+    Window::Show();
 
-	// Create editor
-	editor = std::make_unique<Editor>(Window::g_handle, hInstance, Window::GetWidth(), Window::GetHeight());
+    // Hook it up with the editor
+    Window::g_on_message = [&editor](Spartan::WindowData& window_data) { editor.OnWindowMessage(window_data); };
 
     // Tick
-	while (Window::Tick()) 
-	{ 
-		editor->Tick();
-	}
+    while (Window::Tick())
+    {
+        editor.OnTick();
+    }
 
-	Window::Destroy();
+    // Exit
+    Window::Destroy();
     return 0;
 }

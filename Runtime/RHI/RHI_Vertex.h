@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,110 +27,130 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "../Math/Vector4.h"
 //==========================
 
-namespace Directus
+namespace Spartan
 {
-	struct RHI_Vertex_PosUvNorTan
-	{
-		RHI_Vertex_PosUvNorTan(){}
-		RHI_Vertex_PosUvNorTan(
-			const Math::Vector3& position,
-			const Math::Vector2& uv,
-			const Math::Vector3& normal,
-			const Math::Vector3& tangent)
-		{
-			this->pos[0]	= position.x;
-			this->pos[1]	= position.y;
-			this->pos[2]	= position.z;
+    struct RHI_Vertex_Undefined{};
 
-			this->uv[0]		= uv.x;
-			this->uv[1]		= uv.y;
+    struct RHI_Vertex_Pos
+    {
+        RHI_Vertex_Pos(const Math::Vector3& position)
+        {
+            this->pos[0] = position.x;
+            this->pos[1] = position.y;
+            this->pos[2] = position.z;
+        }
 
-			this->normal[0]	= normal.x;
-			this->normal[1]	= normal.y;
-			this->normal[2]	= normal.z;
+        float pos[3] = { 0 };
+    };
 
-			this->tangent[0]	= tangent.x;
-			this->tangent[1]	= tangent.y;
-			this->tangent[2]	= tangent.z;
-		}
+    struct RHI_Vertex_PosTex
+    {
+        RHI_Vertex_PosTex(const float pos_x, const float pos_y, const float pos_z, const float tex_x, const float tex_y)
+        {
+            pos[0] = pos_x;
+            pos[1] = pos_y;
+            pos[2] = pos_z;
 
-		float pos[3]		= { 0 };
-		float uv[2]			= { 0 };
-		float normal[3]		= { 0 };
-		float tangent[3]	= { 0 };
-	};
+            tex[0] = tex_x;
+            tex[1] = tex_y;
+        }
 
-	struct RHI_Vertex_PosUVNor
-	{
-		RHI_Vertex_PosUVNor(){}
-		RHI_Vertex_PosUVNor(const Math::Vector3& position, const Math::Vector2& uv, const Math::Vector3& normal)
-		{
-			this->pos[0] = position.x;
-			this->pos[1] = position.y;
-			this->pos[2] = position.z;
+        RHI_Vertex_PosTex(const Math::Vector3& pos, const Math::Vector2& tex)
+        {
+            this->pos[0] = pos.x;
+            this->pos[1] = pos.y;
+            this->pos[2] = pos.z;
 
-			this->uv[0] = uv.x;
-			this->uv[1] = uv.y;
+            this->tex[0] = tex.x;
+            this->tex[1] = tex.y;
+        }
 
-			this->normal[0] = normal.x;
-			this->normal[1] = normal.y;
-			this->normal[2] = normal.z;
-		}
+        float pos[3] = { 0 };
+        float tex[2] = { 0 };
+    };
 
-		float pos[3]	= { 0 };
-		float uv[2]		= { 0 };
-		float normal[3] = { 0 };
-	};
+    struct RHI_Vertex_PosCol
+    {
+        RHI_Vertex_PosCol() = default;
 
-	struct RHI_Vertex_PosUV
-	{
-		RHI_Vertex_PosUV(){}
+        RHI_Vertex_PosCol(const Math::Vector3& pos, const Math::Vector4& col)
+        {
+            this->pos[0] = pos.x;
+            this->pos[1] = pos.y;
+            this->pos[2] = pos.z;
 
-		RHI_Vertex_PosUV(float posX, float posY, float posZ, float uvX, float uvY)
-		{
-			pos[0] = posX;
-			pos[1] = posY;
-			pos[2] = posZ;
+            this->col[0] = col.x;
+            this->col[1] = col.y;
+            this->col[2] = col.z;
+            this->col[3] = col.w;
+        }
 
-			uv[0] = uvX;
-			uv[1] = uvY;
-		}
+        float pos[3]    = {0};
+        float col[4]    = {0};
+    };
 
-		RHI_Vertex_PosUV(const Math::Vector3& position, const Math::Vector2& uv)
-		{
-			this->pos[0]	= position.x;
-			this->pos[1]	= position.y;
-			this->pos[2]	= position.z;
+    struct RHI_Vertex_Pos2dTexCol8
+    {
+        RHI_Vertex_Pos2dTexCol8() = default;
 
-			this->uv[0]		= uv.x;
-			this->uv[1]		= uv.y;
-		}
+        float pos[2] = { 0 };
+        float tex[2] = { 0 };
+        uint32_t col = 0;
+    };
 
-		float pos[3]		= { 0 };
-		float uv[2]			= { 0 };
-	};
+    struct RHI_Vertex_PosTexNorTan
+    {
+        RHI_Vertex_PosTexNorTan() = default;
+        RHI_Vertex_PosTexNorTan(
+            const Math::Vector3& pos,
+            const Math::Vector2& tex,
+            const Math::Vector3& nor = Math::Vector3::Zero,
+            const Math::Vector3& tan = Math::Vector3::Zero)
+        {
+            this->pos[0] = pos.x;
+            this->pos[1] = pos.y;
+            this->pos[2] = pos.z;
 
-	struct RHI_Vertex_PosCol
-	{
-		RHI_Vertex_PosCol(){}
-		RHI_Vertex_PosCol(const Math::Vector3& position, const Math::Vector4& color)
-		{
-			this->pos[0]	= position.x;
-			this->pos[1]	= position.y;
-			this->pos[2]	= position.z;
+            this->tex[0] = tex.x;
+            this->tex[1] = tex.y;
 
-			this->color[0]	= color.x;
-			this->color[1]	= color.y;
-			this->color[2]	= color.z;
-			this->color[3]	= color.w;
-		}
+            this->nor[0] = nor.x;
+            this->nor[1] = nor.y;
+            this->nor[2] = nor.z;
 
-		float pos[3]	= {0};
-		float color[4]	= {0};
-	};
+            this->tan[0] = tan.x;
+            this->tan[1] = tan.y;
+            this->tan[2] = tan.z;
+        }
 
-	static_assert(std::is_trivially_copyable<RHI_Vertex_PosUvNorTan>::value,	"RHI_Vertex_PosUVTBN is not trivially copyable");
-	static_assert(std::is_trivially_copyable<RHI_Vertex_PosUVNor>::value,		"RHI_Vertex_PosUVNor is not trivially copyable");
-	static_assert(std::is_trivially_copyable<RHI_Vertex_PosUV>::value,			"RHI_Vertex_PosUV is not trivially copyable");
-	static_assert(std::is_trivially_copyable<RHI_Vertex_PosCol>::value,			"RHI_Vertex_PosCol is not trivially copyable");
+        float pos[3] = { 0 };
+        float tex[2] = { 0 };
+        float nor[3] = { 0 };
+        float tan[3] = { 0 };
+    };
+
+    static_assert(std::is_trivially_copyable<RHI_Vertex_Pos>::value,            "RHI_Vertex_Pos is not trivially copyable");
+    static_assert(std::is_trivially_copyable<RHI_Vertex_PosTex>::value,            "RHI_Vertex_PosTex is not trivially copyable");
+    static_assert(std::is_trivially_copyable<RHI_Vertex_PosCol>::value,            "RHI_Vertex_PosCol is not trivially copyable");
+    static_assert(std::is_trivially_copyable<RHI_Vertex_Pos2dTexCol8>::value,    "RHI_Vertex_Pos2dTexCol8 is not trivially copyable");
+    static_assert(std::is_trivially_copyable<RHI_Vertex_PosTexNorTan>::value,    "RHI_Vertex_PosTexNorTan is not trivially copyable");
+
+    enum RHI_Vertex_Type
+    {
+        RHI_Vertex_Type_Unknown,
+        RHI_Vertex_Type_Position,
+        RHI_Vertex_Type_PositionColor,
+        RHI_Vertex_Type_PositionTexture,
+        RHI_Vertex_Type_PositionTextureNormalTangent,
+        RHI_Vertex_Type_Position2dTextureColor8
+    };
+
+    template <typename T>
+    constexpr RHI_Vertex_Type RHI_Vertex_Type_To_Enum() { return RHI_Vertex_Type_Unknown; }
+    // Explicit template instantiation
+    template<> inline RHI_Vertex_Type RHI_Vertex_Type_To_Enum<RHI_Vertex_Pos>()                { return RHI_Vertex_Type_Position; }
+    template<> inline RHI_Vertex_Type RHI_Vertex_Type_To_Enum<RHI_Vertex_PosTex>()            { return RHI_Vertex_Type_PositionTexture; }
+    template<> inline RHI_Vertex_Type RHI_Vertex_Type_To_Enum<RHI_Vertex_PosCol>()            { return RHI_Vertex_Type_PositionColor; }
+    template<> inline RHI_Vertex_Type RHI_Vertex_Type_To_Enum<RHI_Vertex_Pos2dTexCol8>()    { return RHI_Vertex_Type_Position2dTextureColor8; }
+    template<> inline RHI_Vertex_Type RHI_Vertex_Type_To_Enum<RHI_Vertex_PosTexNorTan>()    { return RHI_Vertex_Type_PositionTextureNormalTangent; }
 }

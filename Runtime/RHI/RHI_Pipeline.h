@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,117 +21,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
+//= INCLUDES =================
 #include <memory>
-#include <vector>
-#include "..\Core\EngineDefs.h"
-#include "..\Math\Rectangle.h"
-#include "RHI_Definition.h"
-#include "RHI_Viewport.h"
-//=============================
+#include "RHI_PipelineState.h"
+//============================
 
-namespace Directus
+namespace Spartan
 {
-	class Context;
-	class Profiler;
-	namespace Math
-	{
-		class Rectangle;
-	}
+    class SPARTAN_CLASS RHI_Pipeline : public Spartan_Object
+    {
+    public:
+        RHI_Pipeline() = default;
+        RHI_Pipeline(const RHI_Device* rhi_device, RHI_PipelineState& pipeline_state, void* descriptor_set_layout);
+        ~RHI_Pipeline();
 
-	struct ConstantBuffer
-	{
-		ConstantBuffer(void* buffer, unsigned int slot, RHI_Buffer_Scope scope)
-		{
-			this->buffer	= buffer;
-			this->slot		= slot;
-			this->scope		= scope;
-		}
+        void* GetPipeline()                     const { return m_pipeline; }
+        void* GetPipelineLayout()               const { return m_pipeline_layout; }
+        RHI_PipelineState* GetPipelineState()         { return &m_state; }
 
-		void* buffer;
-		unsigned int slot;
-		RHI_Buffer_Scope scope;
-	};
+    private:
+        RHI_PipelineState m_state;
+ 
+        // API
+        void* m_pipeline        = nullptr;
+        void* m_pipeline_layout = nullptr;
 
-	class ENGINE_CLASS RHI_Pipeline
-	{
-	public:
-		RHI_Pipeline(Context* context, std::shared_ptr<RHI_Device> rhiDevice);
-		~RHI_Pipeline(){}
-
-		//= DRAW ======================================================================================
-		bool Draw(unsigned int vertexCount);
-		bool DrawIndexed(unsigned int indexCount, unsigned int indexOffset, unsigned int vertexOffset);
-		//=============================================================================================
-
-		//= SET ===========================================================================================================================
-		bool SetShader(const std::shared_ptr<RHI_Shader>& shader);
-		bool SetVertexShader(const std::shared_ptr<RHI_Shader>& shader);
-		bool SetPixelShader(const std::shared_ptr<RHI_Shader>& shader);
-		void SetTexture(const std::shared_ptr<RHI_RenderTexture>& texture);
-		void SetTexture(const std::shared_ptr<RHI_Texture>& texture);
-		void SetTexture(const RHI_Texture* texture);
-		void SetTexture(void* texture);
-		bool SetDepthStencilState(const std::shared_ptr<RHI_DepthStencilState>& depthStencilState);
-		bool SetRasterizerState(const std::shared_ptr<RHI_RasterizerState>& rasterizerState);
-		bool SetBlendState(const std::shared_ptr<RHI_BlendState>& blendState);
-		bool SetInputLayout(const std::shared_ptr<RHI_InputLayout>& inputLayout);
-		bool SetIndexBuffer(const std::shared_ptr<RHI_IndexBuffer>& indexBuffer);
-		bool SetVertexBuffer(const std::shared_ptr<RHI_VertexBuffer>& vertexBuffer);
-		bool SetSampler(const std::shared_ptr<RHI_Sampler>& sampler);	
-		void SetViewport(const RHI_Viewport& viewport);
-		void SetScissorRectangle(const Math::Rectangle& rectangle);
-		bool SetRenderTarget(const std::shared_ptr<RHI_RenderTexture>& renderTarget, void* depthStencilView = nullptr, bool clear = false);
-		bool SetRenderTarget(const std::vector<void*>& renderTargetViews, void* depthStencilView = nullptr, bool clear = false);
-		bool SetRenderTarget(void* renderTargetView, void* depthStencilView = nullptr, bool clear = false);
-		bool SetConstantBuffer(const std::shared_ptr<RHI_ConstantBuffer>& constantBuffer, unsigned int slot, RHI_Buffer_Scope scope);
-		void SetPrimitiveTopology(RHI_PrimitiveTopology_Mode primitiveTopology);		
-		//=================================================================================================================================
-
-		//= STATES ==
-		void Clear();
-		bool Bind();
-		//===========
-
-	private:
-		// Pipeline	
-		std::shared_ptr<RHI_InputLayout> m_inputLayout;
-		std::shared_ptr<RHI_DepthStencilState> m_depthStencilState;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizerState;
-		std::shared_ptr<RHI_BlendState> m_blendState;
-		std::shared_ptr<RHI_IndexBuffer> m_indexBuffer;
-		std::shared_ptr<RHI_VertexBuffer> m_vertexBuffer;
-		std::shared_ptr<RHI_Shader> m_vertexShader;
-		std::shared_ptr<RHI_Shader> m_pixelShader;
-		RHI_Viewport m_viewport;
-		Math::Rectangle m_scissorRectangle;
-		RHI_PrimitiveTopology_Mode m_primitiveTopology;
-		std::vector<ConstantBuffer> m_constantBuffers;
-		std::vector<void*> m_samplers;
-		std::vector<void*> m_textures;
-		std::vector<void*> m_renderTargetViews;	
-		void* m_depthStencilView = nullptr;
-		bool m_renderTargetsClear;
-
-		// Dirty flags
-		bool m_primitiveTopologyDirty	= false;
-		bool m_inputLayoutDirty			= false;
-		bool m_depthStencilStateDirty	= false;
-		bool m_raterizerStateDirty		= false;
-		bool m_samplersDirty			= false;
-		bool m_texturesDirty			= false;
-		bool m_indexBufferDirty			= false;
-		bool m_vertexBufferDirty		= false;
-		bool m_constantBufferDirty		= false;
-		bool m_vertexShaderDirty		= false;
-		bool m_pixelShaderDirty			= false;
-		bool m_viewportDirty			= false;
-		bool m_blendStateDirty			= false;
-		bool m_renderTargetsDirty		= false;
-		bool m_scissorRectangleDirty	= false;
-
-		// Misc
-		std::shared_ptr<RHI_Device> m_rhiDevice;
-		Profiler* m_profiler;
-	};
+        // Dependencies
+        const RHI_Device* m_rhi_device;
+    };
 }

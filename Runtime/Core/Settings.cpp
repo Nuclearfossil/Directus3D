@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,175 +19,164 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ========================
-#include "Settings.h"
-#include <string>
-#include <fstream>
-#include <algorithm>
-#include "../FileSystem/FileSystem.h"
-#include "../Logging/Log.h"
-#include "../Math/MathHelper.h"
-//===================================
+//= INCLUDES ======================
+#include "Spartan.h"
+#include "../Core/FileSystem.h"
+#include "../Rendering/Renderer.h"
+#include "../Threading/Threading.h"
+//=================================
 
 //= NAMESPACES ================
 using namespace std;
-using namespace Directus::Math;
+using namespace Spartan::Math;
 //=============================
 
-namespace SettingsIO
+namespace _Settings
 {
-	ofstream fout;
-	ifstream fin;
-	string fileName = "Directus.ini";
+    ofstream fout;
+    ifstream fin;
+    string file_name = "Spartan.ini";
+
+    template <class T>
+    void write_setting(ofstream& fout, const string& name, T value)
+    {
+        fout << name << "=" << value << endl;
+    }
+
+    template <class T>
+    void read_setting(ifstream& fin, const string& name, T& value)
+    {
+        for (string line; getline(fin, line); )
+        {
+            const auto first_index = line.find_first_of('=');
+            if (name == line.substr(0, first_index))
+            {
+                const auto lastindex = line.find_last_of('=');
+                const auto read_value = line.substr(lastindex + 1, line.length());
+                value = static_cast<T>(stof(read_value));
+                return;
+            }
+        }
+    }
 }
 
-namespace Directus
+namespace Spartan
 {
-	template <class T>
-	void WriteSetting(ofstream& fout, const string& name, T value)
-	{
-		fout << name << "=" << value << endl;
-	}
+    Settings::Settings(Context* context) : ISubsystem(context)
+    {
+        m_context = context;
 
-	template <class T>
-	void ReadSetting(ifstream& fin, const string& name, T& value)
-	{
-		for (string line; getline(fin, line); )
-		{
-			auto firstIndex = line.find_first_of('=');
-			if (name == line.substr(0, firstIndex))
-			{
-				auto lastindex = line.find_last_of('=');
-				string readValue = line.substr(lastindex + 1, line.length());
-				value = (T)stof(readValue);
-				return;
-			}
-		}
-	}
+        // Register pugixml
+        const auto major = to_string(PUGIXML_VERSION / 1000);
+        const auto minor = to_string(PUGIXML_VERSION).erase(0, 1).erase(1, 1);
+        RegisterThirdPartyLib("pugixml", major + "." + minor, "https://github.com/zeux/pugixml");
 
-	Settings::Settings()
-	{
-		m_maxThreadCount = thread::hardware_concurrency();
-	}
+        // Register SPIRV-Cross
+        RegisterThirdPartyLib("SPIRV-Cross", "2020-01-16", "https://github.com/KhronosGroup/SPIRV-Cross");
 
-	void Settings::Initialize()
-	{
-		if (FileSystem::FileExists(SettingsIO::fileName))
-		{
-			// Create a settings file
-			SettingsIO::fin.open(SettingsIO::fileName, ifstream::in);
+        // Register DirectXShaderCompiler
+        RegisterThirdPartyLib("DirectXShaderCompiler", "1.6 - 1.5.0.2860", "https://github.com/microsoft/DirectXShaderCompiler");
+    }
 
-			float resolutionX = 0;
-			float resolutionY = 0;
+    Settings::~Settings()
+    {
+        Reflect();
+        Save();
+    }
 
-			// Read the settings
-			ReadSetting(SettingsIO::fin, "bFullScreen",				m_isFullScreen);
-			ReadSetting(SettingsIO::fin, "bIsMouseVisible",			m_isMouseVisible);
-			ReadSetting(SettingsIO::fin, "fResolutionWidth",		resolutionX);
-			ReadSetting(SettingsIO::fin, "fResolutionHeight",		resolutionY);
-			ReadSetting(SettingsIO::fin, "iShadowMapResolution",	m_shadowMapResolution);
-			ReadSetting(SettingsIO::fin, "iAnisotropy",				m_anisotropy);
-			ReadSetting(SettingsIO::fin, "fFPSLimit",				m_fpsLimit);
-			ReadSetting(SettingsIO::fin, "iMaxThreadCount",			m_maxThreadCount);
+    bool Settings::Initialize()
+    {
+        // Acquire default settings
+        Reflect();
 
-			m_windowSize = Vector2(resolutionX, resolutionY);
+        if (FileSystem::Exists(_Settings::file_name))
+        {
+            Load();
+            Map();
+        }
+        else
+        {
+            Save();
+        }
 
-			if (m_fpsLimit == 0.0f)
-			{
-				m_fpsPolicy = FPS_Unlocked;
-				m_fpsLimit	= FLT_MAX;
-			}
-			else if (m_fpsLimit > 0.0f)
-			{
-				m_fpsPolicy = FPS_Locked;				
-			}
-			else
-			{
-				m_fpsPolicy = FPS_MonitorMatch;
-			}
+        LOG_INFO("Resolution: %dx%d", static_cast<int>(m_resolution.x), static_cast<int>(m_resolution.y));
+        LOG_INFO("FPS Limit: %f", m_fps_limit);
+        LOG_INFO("Shadow resolution: %d", m_shadow_map_resolution);
+        LOG_INFO("Anisotropy: %d", m_anisotropy);
+        LOG_INFO("Max threads: %d", m_max_thread_count);
 
-			// Close the file.
-			SettingsIO::fin.close();
-		}
-		else
-		{
-			// Create a settings file
-			SettingsIO::fout.open(SettingsIO::fileName, ofstream::out);
+        return true;
+    }
 
-			// Write the settings
-			WriteSetting(SettingsIO::fout, "bFullScreen",			m_isFullScreen);
-			WriteSetting(SettingsIO::fout, "bIsMouseVisible",		m_isMouseVisible);
-			WriteSetting(SettingsIO::fout, "fResolutionWidth",		m_windowSize.x);
-			WriteSetting(SettingsIO::fout, "fResolutionHeight",		m_windowSize.y);
-			WriteSetting(SettingsIO::fout, "iShadowMapResolution",	m_shadowMapResolution);
-			WriteSetting(SettingsIO::fout, "iAnisotropy",			m_anisotropy);
-			WriteSetting(SettingsIO::fout, "fFPSLimit",				m_fpsLimit);
-			WriteSetting(SettingsIO::fout, "iMaxThreadCount",		m_maxThreadCount);
+    void Settings::RegisterThirdPartyLib(const std::string& name, const std::string& version, const std::string& url)
+    {
+        m_third_party_libs.emplace_back(name, version, url);
+    }
 
-			// Close the file.
-			SettingsIO::fout.close();
-		}
+    void Settings::Save() const
+    {
+        // Create a settings file
+        _Settings::fout.open(_Settings::file_name, ofstream::out);
 
-		LOGF_INFO("Resolution: %dx%d",		(int)m_windowSize.x, (int)m_windowSize.y);
-		LOGF_INFO("Shadow resolution: %d",	m_shadowMapResolution);
-		LOGF_INFO("Anisotropy: %d",			m_anisotropy);
-		LOGF_INFO("Max fps: %f",			m_fpsLimit);
-		LOGF_INFO("Max threads: %d",		m_maxThreadCount);
-	}
+        // Write the settings
+        _Settings::write_setting(_Settings::fout, "bFullScreen",            m_is_fullscreen);
+        _Settings::write_setting(_Settings::fout, "bIsMouseVisible",        m_is_mouse_visible);
+        _Settings::write_setting(_Settings::fout, "fResolutionWidth",       m_resolution.x);
+        _Settings::write_setting(_Settings::fout, "fResolutionHeight",      m_resolution.y);
+        _Settings::write_setting(_Settings::fout, "iShadowMapResolution",   m_shadow_map_resolution);
+        _Settings::write_setting(_Settings::fout, "iAnisotropy",            m_anisotropy);
+        _Settings::write_setting(_Settings::fout, "fFPSLimit",              m_fps_limit);
+        _Settings::write_setting(_Settings::fout, "iMaxThreadCount",        m_max_thread_count);
+        _Settings::write_setting(_Settings::fout, "iRendererFlags",         m_renderer_flags);
 
-	void Settings::DisplayMode_Add(unsigned int width, unsigned int height, unsigned int refreshRateNumerator, unsigned int refreshRateDenominator)
-	{
-		DisplayMode& mode = m_displayModes.emplace_back(width, height, refreshRateNumerator, refreshRateDenominator);
+        // Close the file.
+        _Settings::fout.close();
+    }
 
-		// Try to deduce the maximum frame rate based on how fast is the monitor
-		if (m_fpsPolicy == FPS_MonitorMatch)
-		{
-			FPS_SetLimit(Math::Helper::Max(m_fpsLimit, mode.refreshRate));
-		}
-	}
+    void Settings::Load()
+    {
+        // Create a settings file
+        _Settings::fin.open(_Settings::file_name, ifstream::in);
 
-	bool Settings::DisplayMode_GetFastest(DisplayMode* displayMode)
-	{
-		if (m_displayModes.empty())
-			return false;
+        // Read the settings
+        _Settings::read_setting(_Settings::fin, "bFullScreen",          m_is_fullscreen);
+        _Settings::read_setting(_Settings::fin, "bIsMouseVisible",      m_is_mouse_visible);
+        _Settings::read_setting(_Settings::fin, "fResolutionWidth",     m_resolution.x);
+        _Settings::read_setting(_Settings::fin, "fResolutionHeight",    m_resolution.y);
+        _Settings::read_setting(_Settings::fin, "iShadowMapResolution", m_shadow_map_resolution);
+        _Settings::read_setting(_Settings::fin, "iAnisotropy",          m_anisotropy);
+        _Settings::read_setting(_Settings::fin, "fFPSLimit",            m_fps_limit);
+        _Settings::read_setting(_Settings::fin, "iMaxThreadCount",      m_max_thread_count);
+        _Settings::read_setting(_Settings::fin, "iRendererFlags",       m_renderer_flags);
 
-		displayMode = &m_displayModes[0];
-		for (auto& mode : m_displayModes)
-		{
-			if (displayMode->refreshRate < mode.refreshRate)
-			{
-				displayMode = &mode;
-			}
-		}
+        // Close the file.
+        _Settings::fin.close();
 
-		return true;
-	}
+        m_loaded = true;
+    }
 
-	void Settings::DisplayAdapter_Add(const string& name, unsigned int memory, unsigned int vendorID, void* data)
-	{
-		m_displayAdapters.emplace_back(name, memory, vendorID, data);
-		sort(m_displayAdapters.begin(), m_displayAdapters.end(), [](const DisplayAdapter& adapter1, const DisplayAdapter& adapter2)
-		{
-			return adapter1.memory > adapter2.memory;
-		});		
-	}
+    void Settings::Reflect()
+    {
+        Renderer* renderer = m_context->GetSubsystem<Renderer>();
 
-	void Settings::DisplayAdapter_SetPrimary(const DisplayAdapter* primaryAdapter)
-	{
-		if (!primaryAdapter)
-			return;
+        m_fps_limit             = m_context->GetSubsystem<Timer>()->GetTargetFps();
+        m_max_thread_count      = m_context->GetSubsystem<Threading>()->GetThreadCountSupport();
+        m_is_fullscreen         = renderer->GetIsFullscreen();
+        m_resolution            = renderer->GetResolution();
+        m_shadow_map_resolution = renderer->GetOptionValue<uint32_t>(Option_Value_ShadowResolution);
+        m_anisotropy            = renderer->GetOptionValue<uint32_t>(Option_Value_Anisotropy);
+        m_renderer_flags        = renderer->GetOptions();
+    }
 
-		m_primaryAdapter = primaryAdapter;
-		LOGF_INFO("%s (%d MB)", primaryAdapter->name.c_str(), primaryAdapter->memory);
-	}
+    void Settings::Map() const
+    {
+        Renderer* renderer = m_context->GetSubsystem<Renderer>();
 
-	void Settings::FPS_SetLimit(float fps)
-	{
-		if (m_fpsLimit != fps)
-		{
-			LOGF_INFO("FPS limit set to %f", fps);
-		}
-
-		m_fpsLimit = fps;
-	}
+        m_context->GetSubsystem<Timer>()->SetTargetFps(m_fps_limit);
+        renderer->SetIsFullscreen(m_is_fullscreen);
+        renderer->SetResolution(static_cast<uint32_t>(m_resolution.x), static_cast<uint32_t>(m_resolution.y));
+        renderer->SetOptionValue(Option_Value_Anisotropy, static_cast<float>(m_anisotropy));
+        renderer->SetOptionValue(Option_Value_ShadowResolution, static_cast<float>(m_shadow_map_resolution));
+        renderer->SetOptions(m_renderer_flags);
+    }
 }

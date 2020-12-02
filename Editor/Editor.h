@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,43 +25,56 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <vector>
 #include <memory>
 #include "RHI/RHI_Definition.h"
+#include "Widgets/Widget.h"
 //=============================
 
 //= FORWARD DECLARATIONS =
-class Widget;
-namespace Directus 
+namespace Spartan 
 {
-	class Context; 
-	class Engine;
-	class Renderer;
-	class Timer;
+    class Context; 
+    class Engine;
+    class Renderer;
+    class Profiler;
+    struct WindowData;
 }
 //========================
 
 class Editor
 {
 public:
-	Editor(void* windowHandle, void* windowInstance, int windowWidth, int windowHeight);
-	~Editor();
+    Editor() = default;
+    ~Editor();
 
-	void Resize(unsigned int width, unsigned int height);
-	void Tick();
+    void OnWindowMessage(Spartan::WindowData& window_data);
+    void OnTick();
+    Spartan::Context* GetContext() { return m_context; }
+
+    template<typename T>
+    T* GetWidget()
+    {
+        for (const auto& widget : m_widgets)
+        {
+            if (T* widget_t = dynamic_cast<T*>(widget.get()))
+            {
+                return widget_t;
+            }
+        }
+
+        return nullptr;
+    }
 
 private:
-	void Widgets_Create();
-	void Widgets_Tick();
-	void DockSpace_Begin();
-	void DockSpace_End();	
-	void ApplyStyle();
+    void ImGui_Initialise(const Spartan::WindowData& window_data);
+    void ImGui_ApplyStyle() const;
+    void ImGui_Begin();
+    void ImGui_End();
 
-	// Editor
-	std::vector<std::unique_ptr<Widget>> m_widgets;
-	bool m_initialized = false;
+    // Editor
+    std::vector<std::shared_ptr<Widget>> m_widgets;
+    bool m_initialised  = false;
+    bool m_editor_begun = false;
 
-	// Engine
-	std::unique_ptr<Directus::Engine> m_engine;
-	std::shared_ptr<Directus::RHI_Device> m_rhiDevice;
-	Directus::Context* m_context	= nullptr;
-	Directus::Renderer* m_renderer	= nullptr;	
-	Directus::Timer* m_timer		= nullptr;
+    // Engine
+    std::unique_ptr<Spartan::Engine> m_engine;
+    Spartan::Context* m_context = nullptr;
 };

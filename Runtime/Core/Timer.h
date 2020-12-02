@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,29 +21,61 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =========
+//= INCLUDES ==========
 #include "ISubsystem.h"
 #include <chrono>
-//====================
+//=====================
 
-namespace Directus
+namespace Spartan
 {
-	class ENGINE_CLASS Timer : public ISubsystem
-	{
-	public:
-		Timer(Context* context);
-		~Timer() {}
+    class Context;
 
-		//= ISubsystem ======
-		void Tick() override;
-		//===================
+    enum FPS_Policy
+    {
+        Fps_Unlocked,
+        Fps_Fixed,
+        Fps_FixedMonitor
+    };
 
-		float GetDeltaTimeMs()	{ return (float)m_deltaTimeMs; }
-		float GetDeltaTimeSec() { return (float)m_deltaTimeMs / 1000.0f; }
+    class SPARTAN_CLASS Timer : public ISubsystem
+    {
+    public:
+        Timer(Context* context);
+        ~Timer() = default;
 
-	private:		
-		std::chrono::high_resolution_clock::time_point time_a;
-		std::chrono::high_resolution_clock::time_point time_b;
-		double m_deltaTimeMs;
-	};
+        //= ISybsystem ======================
+        void Tick(float delta_time) override;
+        //===================================
+
+        //= FPS ============================================
+        void SetTargetFps(double fps);
+        auto GetTargetFps() const   { return m_fps_target; }
+        auto GetMinFps() const      { return m_fps_min; }
+        auto GetFpsPolicy() const   { return m_fps_policy; }
+        //==================================================
+
+        auto GetTimeMs()                const { return m_time_ms; }
+        auto GetTimeSec()               const { return static_cast<float>(m_time_ms / 1000.0); }
+        auto GetDeltaTimeMs()           const { return m_delta_time_ms; }
+        auto GetDeltaTimeSec()          const { return static_cast<float>(m_delta_time_ms / 1000.0); }
+        auto GetDeltaTimeSmoothedMs()   const { return m_delta_time_smoothed_ms; }
+        auto GetDeltaTimeSmoothedSec()  const { return static_cast<float>(m_delta_time_smoothed_ms / 1000.0); }
+
+    private:
+        // Frame time
+        std::chrono::high_resolution_clock::time_point m_time_start;
+        std::chrono::high_resolution_clock::time_point m_time_frame_start;
+        std::chrono::high_resolution_clock::time_point m_time_frame_end;
+        double m_time_ms                = 0.0f;
+        double m_delta_time_ms          = 0.0f;
+        double m_delta_time_smoothed_ms = 0.0f;
+        double m_sleep_overhead         = 0.0f;
+
+        // FPS
+        double m_fps_min                = 30.0;
+        double m_fps_max                = 1000.0;
+        double m_fps_target             = m_fps_max;
+        bool m_user_selected_fps_target = false;
+        FPS_Policy m_fps_policy         = Fps_Unlocked;
+    };
 }

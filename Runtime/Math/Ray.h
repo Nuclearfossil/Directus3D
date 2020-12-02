@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,42 +21,43 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
-#include "../Core/EngineDefs.h"
-#include <vector>
+//= INCLUDES ===========================
 #include "Vector3.h"
-//=============================
+#include "../Core/Spartan_Definitions.h"
+//======================================
 
-namespace Directus
+namespace Spartan
 {
-	class Context;
+    class Context;
 
-	namespace Math
-	{
-		class RayHit;
-		class BoundingBox;
+    namespace Math
+    {
+        class RayHit;
+        class BoundingBox;
 
-		class ENGINE_CLASS Ray
-		{
-		public:
-			Ray();
-			Ray(const Vector3& start, const Vector3& end);
-			~Ray();
+        class SPARTAN_CLASS Ray
+        {
+        public:
+            Ray() = default;
+            Ray(const Vector3& start, const Vector3& end);
+            ~Ray() = default;
 
-			// Traces a ray against all entities in the world, returns all hits in a vector.
-			std::vector<RayHit> Trace(Context* context);
+            // Returns hit distance to a bounding box, or infinity if there is no hit.
+            float HitDistance(const BoundingBox& box) const;
 
-			// Returns hit distance to a bounding box, or infinity if there is no hit.
-			float HitDistance(const BoundingBox& box);
+            // Return hit distance to a triangle, or infinity if no hit. Optionally return hit normal and hit barycentric coordinate at intersect point.
+            float HitDistance(const Vector3& v1, const Vector3& v2, const Vector3& v3, Vector3* out_normal = nullptr, Vector3* out_bary = nullptr) const;
 
-			const Vector3& GetStart() const		{ return m_start; }
-			const Vector3& GetEnd()	const		{ return m_end; }
-			const Vector3& GetDirection() const { return m_direction; }
+            const auto& GetStart()      const { return m_start; }
+            const auto& GetEnd()        const { return m_end; }
+            const auto& GetLength()     const { return m_length; }
+            const auto& GetDirection()  const { return m_direction; }
 
-		private:
-			Vector3 m_start;
-			Vector3 m_end;
-			Vector3 m_direction;
-		};
-	}
+        private:
+            Vector3 m_start;
+            Vector3 m_end;
+            Vector3 m_direction;
+            float m_length = 0.0f;
+        };
+    }
 }

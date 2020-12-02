@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //= INCLUDES =========================
-#include "Engine.h"
-#include "EventSystem.h"
-#include "Timer.h"
+#include "Spartan.h"
 #include "../Audio/Audio.h"
 #include "../Input/Input.h"
 #include "../Physics/Physics.h"
@@ -34,56 +32,59 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "../World/World.h"
 //====================================
 
-//= NAMESPACES =====
+//= NAMESPACES ===============
 using namespace std;
-//==================
+using namespace Spartan::Math;
+//============================
 
-namespace Directus
+namespace Spartan
 {
-	unsigned int Engine::m_flags = 0;
+    Engine::Engine(const WindowData& window_data)
+    {
+        // Window
+        m_window_data = window_data;
 
-	Engine::Engine(std::shared_ptr<Context> context)
-	{
-		m_context = context;
+        // Flags
+        m_flags |= Engine_Physics;
+        m_flags |= Engine_Game;
 
-		m_flags |= Engine_Tick;
-		m_flags |= Engine_Physics;
-		m_flags |= Engine_Game;
+        // Create context
+        m_context = make_shared<Context>();
+        m_context->m_engine = this;
 
-		// Initialize global/static subsystems 
-		FileSystem::Initialize();
-		Settings::Get().Initialize();
+        // Register subsystems
+        m_context->RegisterSubsystem<Timer>(TickType::Variable);         // must be first so it ticks first
+        m_context->RegisterSubsystem<Threading>(TickType::Variable);
+        m_context->RegisterSubsystem<ResourceCache>(TickType::Variable);
+        m_context->RegisterSubsystem<Audio>(TickType::Variable);
+        m_context->RegisterSubsystem<Physics>(TickType::Variable);       // integrates internally
+        m_context->RegisterSubsystem<Input>(TickType::Smoothed);
+        m_context->RegisterSubsystem<Scripting>(TickType::Smoothed);
+        m_context->RegisterSubsystem<World>(TickType::Smoothed);
+        m_context->RegisterSubsystem<Profiler>(TickType::Variable);
+        m_context->RegisterSubsystem<Renderer>(TickType::Smoothed);
+        m_context->RegisterSubsystem<Settings>(TickType::Variable);
+                 
+        // Initialize above subsystems
+        m_context->Initialize();
 
-		// Register subsystems
-		m_context->RegisterSubsystem<Timer>();
-		m_context->RegisterSubsystem<Profiler>();
-		m_context->RegisterSubsystem<Threading>();	
-		m_context->RegisterSubsystem<Input>();
-		m_context->RegisterSubsystem<Audio>();
-		m_context->RegisterSubsystem<ResourceCache>();
-		m_context->RegisterSubsystem<Scripting>();
-		m_context->RegisterSubsystem<Physics>();	
-		m_context->RegisterSubsystem<World>();	
-		m_context->RegisterSubsystem<Renderer>();
+        m_timer = m_context->GetSubsystem<Timer>();
+    }
 
-		// Initialize above subsystems
-		m_context->Initialize();
-	}
+    Engine::~Engine()
+    {
+        EventSystem::Get().Clear(); // this must become a subsystem
+    }
 
-	Engine::~Engine()
-	{
-		EventSystem::Get().Clear();
-	}
+    void Engine::Tick() const
+    {
+        m_context->Tick(TickType::Variable, static_cast<float>(m_timer->GetDeltaTimeSec()));
+        m_context->Tick(TickType::Smoothed, static_cast<float>(m_timer->GetDeltaTimeSmoothedSec()));
+    }
 
-	void Engine::Tick()
-	{
-		FIRE_EVENT(Event_Frame_Start);
-
-		if (EngineMode_IsSet(Engine_Tick))
-		{
-			m_context->Tick();
-		}
-
-		FIRE_EVENT(Event_Frame_End);
-	}
+    void Engine::SetWindowData(WindowData& window_data)
+    {
+        m_window_data = window_data;
+        FIRE_EVENT(EventType::WindowData);
+    }
 }

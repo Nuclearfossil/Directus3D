@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,84 +20,69 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //= INCLUDES =====================
+#include "Spartan.h"
 #include "../RHI_Implementation.h"
 #include "../RHI_InputLayout.h"
 #include "../RHI_Device.h"
-#include "../../Logging/Log.h"
 //================================
 
-//==================
+//= NAMESPACES =====
 using namespace std;
 //==================
 
-namespace Directus
+namespace Spartan
 {
-	RHI_InputLayout::RHI_InputLayout(shared_ptr<RHI_Device> rhiDevice)
-	{
-		m_rhiDevice = rhiDevice;
-	}
+    RHI_InputLayout::~RHI_InputLayout()
+    {
+        d3d11_utility::release(*reinterpret_cast<ID3D11InputLayout**>(&m_resource));
+    }
 
-	RHI_InputLayout::~RHI_InputLayout()
-	{
-		SafeRelease((ID3D11InputLayout*)m_buffer);
-	}
+    bool RHI_InputLayout::_CreateResource(void* vertex_shader_blob)
+    {
+        if (!vertex_shader_blob)
+        {
+            LOG_ERROR_INVALID_PARAMETER();
+            return false;
+        }
 
-	bool RHI_InputLayout::Create(void* vsBlob, unsigned long input_layout)
-	{
-		if (!vsBlob)
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return false;
-		}
+        if (m_vertex_attributes.empty())
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return false;
+        }
 
-		m_inputLayout = input_layout;
-		
-		vector<D3D11_INPUT_ELEMENT_DESC> layoutDescs;
-		if (m_inputLayout & Input_Position2D)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
+        vector<D3D11_INPUT_ELEMENT_DESC> vertex_attributes;
+        for (const auto& vertex_attribute : m_vertex_attributes)
+        {
+            vertex_attributes.emplace_back(D3D11_INPUT_ELEMENT_DESC
+            { 
+                vertex_attribute.name.c_str(),            // SemanticName
+                0,                                        // SemanticIndex
+                d3d11_format[vertex_attribute.format],    // Format
+                0,                                        // InputSlot
+                vertex_attribute.offset,                // AlignedByteOffset
+                D3D11_INPUT_PER_VERTEX_DATA,            // InputSlotClass
+                0                                        // InstanceDataStepRate
+            });
+        }
 
-		if (m_inputLayout & Input_Position3D)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
+        // Create input layout
+        auto d3d_blob = static_cast<ID3D10Blob*>(vertex_shader_blob);
+        const auto result = m_rhi_device->GetContextRhi()->device->CreateInputLayout
+        (
+            vertex_attributes.data(),
+            static_cast<UINT>(vertex_attributes.size()),
+            d3d_blob->GetBufferPointer(),
+            d3d_blob->GetBufferSize(),
+            reinterpret_cast<ID3D11InputLayout**>(&m_resource)
+        );
 
-		if (m_inputLayout & Input_Texture)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
+        if (FAILED(result))
+        {
+            LOG_ERROR("Failed to create input layout, %s", d3d11_utility::dxgi_error_to_string(result));
+            return false;
+        }
 
-		if (m_inputLayout & Input_Color8)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
-
-		if (m_inputLayout & Input_Color32)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
-
-		if (m_inputLayout & Input_NormalTangent)
-		{
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "NORMAL",	0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-			layoutDescs.emplace_back(D3D11_INPUT_ELEMENT_DESC{ "TANGENT",	0, DXGI_FORMAT_R32G32B32_FLOAT, 0, D3D11_APPEND_ALIGNED_ELEMENT, D3D11_INPUT_PER_VERTEX_DATA, 0 });
-		}
-
-		auto buffer = (ID3D10Blob*)vsBlob;
-		if (FAILED(m_rhiDevice->GetDevice<ID3D11Device>()->CreateInputLayout
-		(
-			layoutDescs.data(),
-			(unsigned int)layoutDescs.size(),
-			buffer->GetBufferPointer(),
-			buffer->GetBufferSize(),
-			(ID3D11InputLayout**)&m_buffer
-		)))
-		{
-			LOG_ERROR("Failed to create input layout");
-			return false;
-		}
-
-		return true;
-	}
+        return true;
+    }
 }

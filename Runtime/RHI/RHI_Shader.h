@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,143 +24,73 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //= INCLUDES ======================
 #include <memory>
 #include <string>
-#include <map>
-#include "RHI_Definition.h"
-#include "RHI_Object.h"
-#include "..\Core\EngineDefs.h"
-#include "..\Core\Context.h"
-#include "..\Threading\Threading.h"
-#include "..\Logging\Log.h"
+#include <unordered_map>
+#include <vector>
+#include "../Core/Spartan_Object.h"
+#include "RHI_Vertex.h"
+#include "RHI_Desctiptor.h"
 //=================================
 
-namespace Directus
+namespace Spartan
 {
-	static const char* VERTEX_SHADER_ENTRYPOINT = "mainVS";
-	static const char* PIXEL_SHADER_ENTRYPOINT	= "mainPS";
-	static const char* VERTEX_SHADER_MODEL		= "vs_5_0";
-	static const char* PIXEL_SHADER_MODEL		= "ps_5_0";
+    // Forward declarations
+    class Context;
 
-	enum Shader_State
-	{
-		Shader_Uninitialized,
-		Shader_Compiling,
-		Shader_Built,
-		Shader_Failed
-	};
+    class SPARTAN_CLASS RHI_Shader : public Spartan_Object
+    {
+    public:
+        RHI_Shader() = default;
+        RHI_Shader(Context* context);
+        ~RHI_Shader();
 
-	class ENGINE_CLASS RHI_Shader : public RHI_Object
-	{
-	public:
-		//= GRAPHICS API =================================
-		RHI_Shader(std::shared_ptr<RHI_Device> rhiDevice);
-		~RHI_Shader();
-		//================================================
+        // Compilation
+        template<typename T> void Compile(const RHI_Shader_Type type, const std::string& shader);
+        void Compile(const RHI_Shader_Type type, const std::string& shader) { Compile<RHI_Vertex_Undefined>(type, shader); }
+        template<typename T> void CompileAsync(const RHI_Shader_Type type, const std::string& shader);
+        void CompileAsync(const RHI_Shader_Type type, const std::string& shader) { CompileAsync<RHI_Vertex_Undefined>(type, shader); }
+        auto GetCompilationState()  const { return m_compilation_state; }
+        bool IsCompiled()           const { return m_compilation_state == Shader_Compilation_Succeeded; }
+        void WaitForCompilation();
 
-		#define LOG_STATE(state, filePath)								\
-		if (state == Shader_Built)										\
-		{																\
-			LOGF_INFO("Successfully compiled %s", filePath.c_str());	\
-		}																\
-		else if (state == Shader_Failed)								\
-		{																\
-			LOGF_ERROR("Failed to compile %s", filePath.c_str());		\
-		}
+        // Resource
+        void* GetResource() const { return m_resource; }
+        bool HasResource()  const { return m_resource != nullptr; }
 
-		virtual void CompileVertex(const std::string& shader, unsigned long inputLayout)
-		{
-			m_shaderState	= Shader_Compiling;
-			bool vertex		= API_CompileVertex(shader, inputLayout);
+        // Name
+        const std::string& GetName() const      { return m_name; }
+        void SetName(const std::string& name)   { m_name = name; }
 
-			m_shaderState = (vertex) ? Shader_Built : Shader_Failed;
-			LOG_STATE(m_shaderState, shader);
-		}
+        // Defines
+        void AddDefine(const std::string& define, const std::string& value = "1")    { m_defines[define] = value; }
+        auto& GetDefines() const                                                    { return m_defines; }
 
-		virtual void CompileVertex_Async(const std::string& shader, unsigned long inputLayout, Context* context)
-		{
-			context->GetSubsystem<Threading>()->AddTask([this, shader, inputLayout]()
-			{
-				CompileVertex(shader, inputLayout);
-			});
-		}
+        // Misc
+        const std::vector<RHI_Descriptor>& GetDescriptors() const { return m_descriptors; }
+        const auto& GetInputLayout()                        const { return m_input_layout; } // only valid for vertex shader
+        const auto& GetFilePath()                           const { return m_file_path; }
+        RHI_Shader_Type GetShaderStage()                    const { return m_shader_type; }
+        const char* GetEntryPoint()                         const;
+        const char* GetTargetProfile()                      const;
+        const char* GetShaderModel()                        const;
 
-		virtual void CompilePixel(const std::string& shader)
-		{
-			m_shaderState	= Shader_Compiling;
-			bool pixel		= API_CompilePixel(shader);
+    protected:
+        std::shared_ptr<RHI_Device> m_rhi_device;
 
-			m_shaderState= (pixel) ? Shader_Built : Shader_Failed;
-			LOG_STATE(m_shaderState, shader);
-		}
+    private:
+        // All compile functions resolve to this, and this is what the underlying API implements
+        void* _Compile(const std::string& shader);
+        void _Reflect(const RHI_Shader_Type shader_type, const uint32_t* ptr, uint32_t size);
 
+        std::string m_name;
+        std::string m_file_path;
+        std::unordered_map<std::string, std::string> m_defines;
+        std::vector<RHI_Descriptor> m_descriptors;
+        std::shared_ptr<RHI_InputLayout> m_input_layout;
+        Shader_Compilation_State m_compilation_state    = Shader_Compilation_Unknown;
+        RHI_Shader_Type m_shader_type                   = RHI_Shader_Unknown;
+        RHI_Vertex_Type m_vertex_type                   = RHI_Vertex_Type_Unknown;
 
-		virtual void CompilePixel_Async(const std::string& shader, Context* context)
-		{
-			context->GetSubsystem<Threading>()->AddTask([this, shader]()
-			{
-				CompilePixel(shader);
-			});
-		}
-
-		virtual void CompileVertexPixel(const std::string& shader, unsigned long inputLayout)
-		{
-			m_shaderState	= Shader_Compiling;
-			bool vertex		= API_CompileVertex(shader, inputLayout);
-			bool pixel		= API_CompilePixel(shader);
-
-			m_shaderState = (vertex && pixel) ? Shader_Built : Shader_Failed;
-			LOG_STATE(m_shaderState, shader);
-		}
-
-		virtual void CompileVertexPixel_Async(const std::string& shader, unsigned long inputLayout, Context* context)
-		{
-			context->GetSubsystem<Threading>()->AddTask([this, shader, inputLayout]()
-			{
-				CompileVertexPixel(shader, inputLayout);
-			});
-		}
-
-		void AddDefine(const std::string& define, const std::string& value = "1");
-
-		template <typename T>
-		void AddBuffer()
-		{
-			m_bufferSize = sizeof(T);
-			CreateConstantBuffer(m_bufferSize);
-		}
-		void UpdateBuffer(void* data);
-		void* GetVertexShaderBuffer()								{ return m_vertexShader; }
-		void* GetPixelShaderBuffer()								{ return m_pixelShader; }
-		std::shared_ptr<RHI_ConstantBuffer>& GetConstantBuffer()	{ return m_constantBuffer; }
-		void SetName(const std::string& name)						{ m_name = name; }
-		bool HasVertexShader()										{ return m_hasVertexShader; }
-		bool HasPixelShader()										{ return m_hasPixelShader; }
-		std::shared_ptr<RHI_InputLayout> GetInputLayout()			{ return m_inputLayout; }
-		Shader_State GetState()										{ return m_shaderState; }
-
-	protected:
-		std::shared_ptr<RHI_Device> m_rhiDevice;
-
-	private:
-		//= API =============================================================================
-		virtual bool API_CompileVertex(const std::string& shader, unsigned long inputLayout);
-		virtual bool API_CompilePixel(const std::string& shader);
-		//===================================================================================
-		void CreateConstantBuffer(unsigned int size);
-
-		unsigned int m_bufferSize;	
-		std::shared_ptr<RHI_ConstantBuffer> m_constantBuffer;	
-		std::string m_name;
-		std::string m_filePath;
-		std::string m_entrypoint;
-		std::string m_profile;
-		std::map<std::string, std::string> m_macros;
-		std::shared_ptr<RHI_InputLayout> m_inputLayout;	
-		bool m_hasVertexShader		= false;
-		bool m_hasPixelShader		= false;
-		Shader_State m_shaderState	= Shader_Uninitialized;
-
-		// D3D11
-		void* m_vertexShader	= nullptr;
-		void* m_pixelShader		= nullptr;
-	};
+        // API 
+        void* m_resource = nullptr;
+    };
 }

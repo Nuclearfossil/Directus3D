@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,80 +21,49 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
-#include "RHI_Definition.h"
-#include "../Core/EngineDefs.h"
+//= INCLUDES ======================
+#include "../Core/Spartan_Object.h"
+#include <mutex>
 #include <memory>
-#include <string>
-//=============================
+#include "../Display/DisplayMode.h"
+#include "RHI_PhysicalDevice.h"
+//=================================
 
-namespace Directus
+namespace Spartan
 {
-	namespace Math
-	{ 
-		class Vector4;
-		class Rectangle;
-	}
+    class SPARTAN_CLASS RHI_Device : public Spartan_Object
+    {
+    public:
+        RHI_Device(Context* context);
+        ~RHI_Device();
 
-	class ENGINE_CLASS RHI_Device
-	{
-	public:
-		RHI_Device(void* drawHandle);
-		~RHI_Device();
+        // Physical device
+        void RegisterPhysicalDevice(const PhysicalDevice& physical_device);    
+        const PhysicalDevice* GetPrimaryPhysicalDevice();
+        void SetPrimaryPhysicalDevice(const uint32_t index);
+        const std::vector<PhysicalDevice>& GetPhysicalDevices() const { return m_physical_devices; }
 
-		//= DRAW/PRESENT ==============================================================================
-		bool Draw(unsigned int vertexCount);
-		bool DrawIndexed(unsigned int indexCount, unsigned int indexOffset, unsigned int vertexOffset);
-		//=============================================================================================
+        // Queue
+        bool Queue_Present(void* swapchain_view, uint32_t* image_index, RHI_Semaphore* wait_semaphore = nullptr) const;
+        bool Queue_Submit(const RHI_Queue_Type type, void* cmd_buffer, RHI_Semaphore* wait_semaphore = nullptr, RHI_Semaphore* signal_semaphore = nullptr, RHI_Fence* signal_fence = nullptr, const uint32_t wait_flags = 0) const;
+        bool Queue_Wait(const RHI_Queue_Type type) const;
+        bool Queue_WaitAll() const;
+        void* Queue_Get(const RHI_Queue_Type type) const;
+        uint32_t Queue_Index(const RHI_Queue_Type type) const;
 
-		//= CLEAR ============================================================================================
-		bool ClearRenderTarget(void* renderTarget, const Math::Vector4& color);
-		bool ClearDepthStencil(void* depthStencil, unsigned int flags, float depth, unsigned int stencil = 0);
-		//====================================================================================================
+        // Misc
+        bool ValidateResolution(const uint32_t width, const uint32_t height) const;
+        auto IsInitialized()                const { return m_initialized; }
+        RHI_Context* GetContextRhi()        const { return m_rhi_context.get(); }
+        Context* GetContext()               const { return m_context; }
+        uint32_t GetEnabledGraphicsStages() const { return m_enabled_graphics_shader_stages; }
 
-		//= SET ========================================================================================================
-		bool SetVertexBuffer(const std::shared_ptr<RHI_VertexBuffer>& buffer);
-		bool SetIndexBuffer(const std::shared_ptr<RHI_IndexBuffer>& buffer);
-		bool SetVertexShader(const std::shared_ptr<RHI_Shader>& shader);
-		bool SetPixelShader(const std::shared_ptr<RHI_Shader>& shader);
-		bool SetDepthStencilState(const std::shared_ptr<RHI_DepthStencilState>& depthStencilState);
-		bool SetRasterizerState(const std::shared_ptr<RHI_RasterizerState>& rasterizerState);
-		bool SetBlendState(const std::shared_ptr<RHI_BlendState>& blendState);
-		bool SetInputLayout(const std::shared_ptr<RHI_InputLayout>& inputLayout);	
-		bool SetPrimitiveTopology(RHI_PrimitiveTopology_Mode primitiveTopology);
-		bool SetConstantBuffers(unsigned int startSlot, unsigned int bufferCount, void* buffer, RHI_Buffer_Scope scope);
-		bool SetSamplers(unsigned int startSlot, unsigned int samplerCount, void* samplers);
-		bool SetTextures(unsigned int startSlot, unsigned int resourceCount, void* shaderResources);	
-		bool SetRenderTargets(unsigned int renderTargetCount, void* renderTargets, void* depthStencil);	
-		bool SetViewport(const RHI_Viewport& viewport);
-		bool SetScissorRectangle(const Math::Rectangle& rectangle);
-		//==============================================================================================================
-
-		//= EVENTS ==============================
-		void EventBegin(const std::string& name);
-		void EventEnd();
-		//=======================================
-
-		//= PROFILING ====================================================================
-		bool Profiling_CreateQuery(void** buffer, RHI_Query_Type type);
-		bool Profiling_QueryStart(void* queryObject);
-		bool Profiling_QueryEnd(void* queryObject);
-		bool Profiling_GetTimeStamp(void* queryDisjoint);
-		float Profiling_GetDuration(void* queryDisjoint, void* queryStart, void* queryEnd);
-		//=================================================================================
-
-		//= MISC ==============================================
-		bool IsInitialized()	{ return m_initialized; }
-		template <typename T>
-		T* GetDevice()			{ return (T*)m_device; }
-		template <typename T>
-		T* GetDeviceContext()	{ return (T*)m_deviceContext; }
-		void DetectPrimaryAdapter(RHI_Format format);
-		//=====================================================
-
-	private:
-		bool m_initialized		= false;
-		void* m_device			= nullptr;
-		void* m_deviceContext	= nullptr;
-	};
+    private:    
+        std::vector<PhysicalDevice> m_physical_devices;
+        uint32_t m_physical_device_index            = 0;     
+        uint32_t m_enabled_graphics_shader_stages   = 0;
+        bool m_initialized                          = false;
+        mutable std::mutex m_queue_mutex;
+        std::shared_ptr<RHI_Context> m_rhi_context;
+    };
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,107 +24,79 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //= INCLUDES =====================
 #include <memory>
 #include <vector>
+#include "Material.h"
 #include "../RHI/RHI_Definition.h"
 #include "../Resource/IResource.h"
 #include "../Math/BoundingBox.h"
-#include "Material.h"
 //================================
 
-namespace Directus
+namespace Spartan
 {
-	class ResourceCache;
-	class Entity;
-	class Mesh;
-	class Animation;
+    class ResourceCache;
+    class Entity;
+    class Mesh;
+    namespace Math{ class BoundingBox; }
 
-	namespace Math
-	{
-		class BoundingBox;
-	}
+    class SPARTAN_CLASS Model : public IResource, public std::enable_shared_from_this<Model>
+    {
+    public:
+        Model(Context* context);
+        ~Model();
 
-	class ENGINE_CLASS Model : public IResource
-	{
-	public:
-		Model(Context* context);
-		~Model();
+        void Clear();
 
-		//= RESOURCE INTERFACE =========================================
-		bool LoadFromFile(const std::string& filePath) override;
-		bool SaveToFile(const std::string& filePath) override;
-		unsigned int GetMemoryUsage() override { return m_memoryUsage; }
-		//==============================================================
+        //= IResource ===========================================
+        bool LoadFromFile(const std::string& file_path) override;
+        bool SaveToFile(const std::string& file_path) override;
+        //=======================================================
 
-		// Sets the entity that represents this model in the scene
-		void SetRootentity(const std::shared_ptr<Entity>& entity) { m_rootentity = entity; }
+        // Geometry
+        void AppendGeometry(
+            const std::vector<uint32_t>& indices,
+            const std::vector<RHI_Vertex_PosTexNorTan>& vertices,
+            uint32_t* index_offset  = nullptr,
+            uint32_t* vertex_offset = nullptr
+        ) const;
+        void GetGeometry(
+            uint32_t index_offset,
+            uint32_t index_count,
+            uint32_t vertex_offset,
+            uint32_t vertex_count,
+            std::vector<uint32_t>* indices,
+            std::vector<RHI_Vertex_PosTexNorTan>* vertices
+        ) const;
+        void UpdateGeometry();
+        const auto& GetAabb() const { return m_aabb; }
+        const auto& GetMesh() const { return m_mesh; }
 
-		//= GEOMTETRY =============================================
-		void Geometry_Append(
-			std::vector<unsigned int>& indices,
-			std::vector<RHI_Vertex_PosUvNorTan>& vertices,
-			unsigned int* indexOffset = nullptr,
-			unsigned int* vertexOffset = nullptr
-		);
-		void Geometry_Get(
-			unsigned int indexOffset,
-			unsigned int indexCount,
-			unsigned int vertexOffset, 
-			unsigned int vertexCount,
-			std::vector<unsigned int>* indices,
-			std::vector<RHI_Vertex_PosUvNorTan>* vertices
-		);
-		void Geometry_Update();
-		const Math::BoundingBox& Geometry_AABB() { return m_aabb; }
-		//=========================================================
+        // Add resources to the model
+        void SetRootEntity(const std::shared_ptr<Entity>& entity) { m_root_entity = entity; }
+        void AddMaterial(std::shared_ptr<Material>& material, const std::shared_ptr<Entity>& entity) const;
+        void AddTexture(std::shared_ptr<Material>& material, Material_Property texture_type, const std::string& file_path);
 
-		// Add resources to the model
-		void AddMaterial(std::shared_ptr<Material>& material, const std::shared_ptr<Entity>& entity);
-		void AddAnimation(std::shared_ptr<Animation>& animation);
-		void AddTexture(std::shared_ptr<Material>& material, TextureType textureType, const std::string& filePath);
+        // Misc
+        bool IsAnimated()                           const { return m_is_animated; }
+        void SetAnimated(const bool is_animated)          { m_is_animated = is_animated; }
+        const RHI_IndexBuffer* GetIndexBuffer()     const { return m_index_buffer.get(); }
+        const RHI_VertexBuffer* GetVertexBuffer()   const { return m_vertex_buffer.get(); }
+        auto GetSharedPtr()                                  { return shared_from_this(); }
 
-		bool IsAnimated() { return m_isAnimated; }
-		void SetAnimated(bool isAnimated) { m_isAnimated = isAnimated; }
+    private:
+        // Geometry
+        bool GeometryCreateBuffers();
+        float GeometryComputeNormalizedScale() const;
 
-		void SetWorkingDirectory(const std::string& directory);
+        // Misc
+        std::weak_ptr<Entity> m_root_entity;
+        std::shared_ptr<RHI_VertexBuffer> m_vertex_buffer;
+        std::shared_ptr<RHI_IndexBuffer> m_index_buffer;
+        std::shared_ptr<Mesh> m_mesh;
+        Math::BoundingBox m_aabb;
+        float m_normalized_scale    = 1.0f;
+        bool m_is_animated            = false;
 
-		std::shared_ptr<RHI_IndexBuffer> GetIndexBuffer()	{ return m_indexBuffer; }
-		std::shared_ptr<RHI_VertexBuffer> GetVertexBuffer() { return m_vertexBuffer; }
-
-	private:
-		// Load the model from disk
-		bool LoadFromEngineFormat(const std::string& filePath);
-		bool LoadFromForeignFormat(const std::string& filePath);
-
-		// Geometry
-		bool Geometry_CreateBuffers();
-		float Geometry_ComputeNormalizedScale();
-		unsigned int Geometry_ComputeMemoryUsage();
-
-		// The root entity that represents this model in the scene
-		std::weak_ptr<Entity> m_rootentity;
-
-		// Geometry
-		std::shared_ptr<RHI_VertexBuffer> m_vertexBuffer;
-		std::shared_ptr<RHI_IndexBuffer> m_indexBuffer;
-		std::shared_ptr<Mesh> m_mesh;
-		Math::BoundingBox m_aabb;
-		unsigned int meshCount;
-
-		// Material
-		std::vector<std::shared_ptr<Material>> m_materials;
-
-		// Animations
-		std::vector<std::shared_ptr<Animation>> m_animations;
-
-		// Directories relative to this model
-		std::string m_modelDirectoryModel;
-		std::string m_modelDirectoryMaterials;
-		std::string m_modelDirectoryTextures;
-
-		// Misc
-		float m_normalizedScale;
-		unsigned int m_memoryUsage;		
-		bool m_isAnimated;
-		ResourceCache* m_resourceManager;
-		std::shared_ptr<RHI_Device> m_rhiDevice;	
-	};
+        // Dependencies
+        ResourceCache* m_resource_manager;
+        std::shared_ptr<RHI_Device> m_rhi_device;    
+    };
 }

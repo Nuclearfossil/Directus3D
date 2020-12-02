@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,58 +21,79 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =================
+//= INCLUDES ==================
 #include "../Core/ISubsystem.h"
-//============================
+#include "../Math/Vector3.h"
+//=============================
 
+//= FORWARD DECLARATIONS =================
 class btBroadphaseInterface;
 class btCollisionDispatcher;
-class btConstraintSolver;
+class btSequentialImpulseConstraintSolver;
 class btDefaultCollisionConfiguration;
+class btCollisionObject;
 class btDiscreteDynamicsWorld;
+class btRigidBody;
+class btSoftBody;
+class btTypedConstraint;
+struct btSoftBodyWorldInfo;
+//========================================
 
-namespace Directus
+namespace Spartan
 {
-	class Renderer;
-	class Variant;
-	class PhysicsDebugDraw;
-	class Profiler;
+    class Renderer;
+    class PhysicsDebugDraw;
+    class Profiler;
+    namespace Math { class Vector3; }    
 
-	namespace Math
-	{
-		class Vector3;
-	}	
+    class Physics : public ISubsystem
+    {
+    public:
+        Physics(Context* context);
+        ~Physics();
 
-	class Physics : public ISubsystem
-	{
-	public:
-		Physics(Context* context);
-		~Physics();
+        //= Subsystem =======================
+        bool Initialize() override;
+        void Tick(float delta_time) override;
+        //===================================
 
-		//= Subsystem =============
-		bool Initialize() override;
-		void Tick() override;
-		//=========================
-	
-		Math::Vector3 GetGravity();
-		btDiscreteDynamicsWorld* GetWorld()		{ return m_world; }
-		PhysicsDebugDraw* GetPhysicsDebugDraw() { return m_debugDraw; }
-		bool IsSimulating()						{ return m_simulating; }
+        // Rigid body
+        void AddBody(btRigidBody* body) const;
+        void RemoveBody(btRigidBody*& body) const;
 
-	private:
-		btBroadphaseInterface* m_broadphase;
-		btCollisionDispatcher* m_dispatcher;
-		btConstraintSolver* m_constraintSolver;
-		btDefaultCollisionConfiguration* m_collisionConfiguration;
-		btDiscreteDynamicsWorld* m_world;
-		PhysicsDebugDraw* m_debugDraw;
+        // Soft body
+        void AddBody(btSoftBody* body) const;
+        void RemoveBody(btSoftBody*& body) const;
 
-		//= PROPERTIES ===
-		int m_maxSubSteps;
-		bool m_simulating;
-		//================
+        // Constraint
+        void AddConstraint(btTypedConstraint* constraint, bool collision_with_linked_body = true) const;
+        void RemoveConstraint(btTypedConstraint*& constraint) const;
 
-		Renderer* m_renderer;
-		Profiler* m_profiler;
-	};
+        // Properties
+        Math::Vector3 GetGravity()  const;
+        auto& GetSoftWorldInfo()    const { return *m_world_info; }
+        auto GetPhysicsDebugDraw()  const { return m_debug_draw; }
+        bool IsSimulating()         const { return m_simulating; }
+
+    private:
+        btBroadphaseInterface* m_broadphase                         = nullptr;
+        btCollisionDispatcher* m_collision_dispatcher               = nullptr;
+        btSequentialImpulseConstraintSolver* m_constraint_solver    = nullptr;
+        btDefaultCollisionConfiguration* m_collision_configuration  = nullptr;
+        btDiscreteDynamicsWorld* m_world                            = nullptr;
+        btSoftBodyWorldInfo* m_world_info                           = nullptr;
+        PhysicsDebugDraw* m_debug_draw                              = nullptr;
+
+        // Misc
+        Renderer* m_renderer = nullptr;
+        Profiler* m_profiler = nullptr;
+
+        //= PROPERTIES =================================================
+        int m_max_sub_steps         = 1;
+        int m_max_solve_iterations  = 256;
+        float m_internal_fps        = 60.0f;
+        Math::Vector3 m_gravity     = Math::Vector3(0.0f, -9.81f, 0.0f);
+        bool m_simulating           = false;
+        //==============================================================
+    };
 }

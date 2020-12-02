@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -27,99 +27,102 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "../../Math/Vector3.h"
 #include "../../Math/Quaternion.h"
 #include "../../Math/Matrix.h"
-#include "../World.h"
 //================================
 
-namespace Directus
+namespace Spartan
 {
-	class ENGINE_CLASS Transform : public IComponent
-	{
-	public:
-		Transform(Context* context, Entity* entity, Transform* transform);
-		~Transform();
+    class RHI_Device;
+    class RHI_ConstantBuffer;
 
-		//= ICOMPONENT ===============================
-		void OnInitialize() override;
-		void Serialize(FileStream* stream) override;
-		void Deserialize(FileStream* stream) override;
-		//============================================
+    class SPARTAN_CLASS Transform : public IComponent
+    {
+    public:
+        Transform(Context* context, Entity* entity, uint32_t id = 0);
+        ~Transform() = default;
 
-		void UpdateTransform();
+        //= ICOMPONENT ===============================
+        void OnInitialize() override;
+        void Serialize(FileStream* stream) override;
+        void Deserialize(FileStream* stream) override;
+        //============================================
 
-		//= POSITION ================================================================
-		Math::Vector3 GetPosition()				{ return m_matrix.GetTranslation(); }
-		const Math::Vector3& GetPositionLocal() { return m_positionLocal; }
-		void SetPosition(const Math::Vector3& position);
-		void SetPositionLocal(const Math::Vector3& position);
-		//===========================================================================
+        void UpdateTransform();
 
-		//= ROTATION =========================================================
-		Math::Quaternion GetRotation() { return m_matrix.GetRotation(); }
-		const Math::Quaternion& GetRotationLocal() { return m_rotationLocal; }
-		void SetRotation(const Math::Quaternion& rotation);
-		void SetRotationLocal(const Math::Quaternion& rotation);
-		//====================================================================
+        //= POSITION ==============================================================
+        Math::Vector3 GetPosition()     const { return m_matrix.GetTranslation(); }
+        const auto& GetPositionLocal()  const { return m_positionLocal; }
+        void SetPosition(const Math::Vector3& position);
+        void SetPositionLocal(const Math::Vector3& position);
+        //=========================================================================
 
-		//= SCALE ===================================================
-		Math::Vector3 GetScale() { return m_matrix.GetScale(); }
-		const Math::Vector3& GetScaleLocal() { return m_scaleLocal; }
-		void SetScale(const Math::Vector3& scale);
-		void SetScaleLocal(const Math::Vector3& scale);
-		//===========================================================
+        //= ROTATION ===========================================================
+        Math::Quaternion GetRotation() const { return m_matrix.GetRotation(); }
+        const auto& GetRotationLocal() const { return m_rotationLocal; }
+        void SetRotation(const Math::Quaternion& rotation);
+        void SetRotationLocal(const Math::Quaternion& rotation);
+        //======================================================================
 
-		//= TRANSLATION/ROTATION ==================
-		void Translate(const Math::Vector3& delta);
-		void Rotate(const Math::Quaternion& delta);
-		//=========================================
+        //= SCALE =======================================================
+        auto GetScale()             const { return m_matrix.GetScale(); }
+        const auto& GetScaleLocal() const { return m_scaleLocal; }
+        void SetScale(const Math::Vector3& scale);
+        void SetScaleLocal(const Math::Vector3& scale);
+        //===============================================================
 
-		//= DIRECTIONS ============
-		Math::Vector3 GetUp();
-		Math::Vector3 GetForward();
-		Math::Vector3 GetRight();
-		//=========================
+        //= TRANSLATION/ROTATION ==================
+        void Translate(const Math::Vector3& delta);
+        void Rotate(const Math::Quaternion& delta);
+        //=========================================
 
-		//= HIERARCHY =================================================================
-		bool IsRoot()		{ return !HasParent(); }
-		bool HasParent()	{ return m_parent; }
-		void SetParent(Transform* newParent);
-		void BecomeOrphan();
-		bool HasChildren() { return GetChildrenCount() > 0 ? true : false; }
-		void AddChild(Transform* child);
-		Transform* GetRoot()	{ return HasParent() ? GetParent()->GetRoot() : this; }
-		Transform* GetParent()	{ return m_parent; }
-		Transform* GetChildByIndex(int index);
-		Transform* GetChildByName(const std::string& name);
-		const std::vector<Transform*>& GetChildren() { return m_children; }
-		int GetChildrenCount() { return (int)m_children.size(); }
-		void AcquireChildren();
-		bool IsDescendantOf(Transform* transform);
-		void GetDescendants(std::vector<Transform*>* descendants);
-		//=============================================================================
+        //= DIRECTIONS ===================
+        Math::Vector3 GetUp()       const;
+        Math::Vector3 GetDown()     const;
+        Math::Vector3 GetForward()  const;
+        Math::Vector3 GetBackward() const;
+        Math::Vector3 GetRight()    const;
+        Math::Vector3 GetLeft()     const;
+        //================================
 
-		void LookAt(const Math::Vector3& v) { m_lookAt = v; }
-		Math::Matrix& GetMatrix()			{ return m_matrix; }
-		Math::Matrix& GetLocalMatrix()		{ return m_matrixLocal; }
+        //= HIERARCHY ==========================================================================
+        bool IsRoot() const        { return !HasParent(); }
+        bool HasParent() const    { return m_parent; }
+        void SetParent(Transform* new_parent);
+        void BecomeOrphan();
+        bool HasChildren() const            { return GetChildrenCount() > 0 ? true : false; }
+        uint32_t GetChildrenCount() const    { return static_cast<uint32_t>(m_children.size()); }
+        void AddChild(Transform* child);
+        Transform* GetRoot()            { return HasParent() ? GetParent()->GetRoot() : this; }
+        Transform* GetParent() const    { return m_parent; }
+        Transform* GetChildByIndex(uint32_t index);
+        Transform* GetChildByName(const std::string& name);
+        const std::vector<Transform*>& GetChildren() const    { return m_children; }
+    
+        void AcquireChildren();
+        bool IsDescendantOf(const Transform* transform) const;
+        void GetDescendants(std::vector<Transform*>* descendants);
+        //======================================================================================
 
-		// Velocity tracking
-		Math::Matrix& GetWVP_Previous()				{ return m_wvp_previous; }
-		void SetWVP_Previous(Math::Matrix& matrix)	{ m_wvp_previous = matrix; }
+        void LookAt(const Math::Vector3& v)                       { m_lookAt = v; }
+        const Math::Matrix& GetMatrix()                     const { return m_matrix; }     
+        const Math::Matrix& GetLocalMatrix()                const { return m_matrixLocal; }
+        const Math::Matrix& GetWvpLastFrame()               const { return m_wvp_previous; }
+        void SetWvpLastFrame(const Math::Matrix& matrix)          { m_wvp_previous = matrix;}
 
-	private:
-		Math::Matrix GetParentTransformMatrix();
+    private:
+        Math::Matrix GetParentTransformMatrix() const;
 
-		// local
-		Math::Vector3 m_positionLocal;
-		Math::Quaternion m_rotationLocal;
-		Math::Vector3 m_scaleLocal;
+        // local
+        Math::Vector3 m_positionLocal;
+        Math::Quaternion m_rotationLocal;
+        Math::Vector3 m_scaleLocal;
 
-		Math::Matrix m_matrix;
-		Math::Matrix m_matrixLocal;
-		Math::Vector3 m_lookAt;
+        Math::Matrix m_matrix;
+        Math::Matrix m_matrixLocal;
+        Math::Vector3 m_lookAt;
 
-		Transform* m_parent; // the parent of this transform
-		std::vector<Transform*> m_children; // the children of this transform
+        Transform* m_parent; // the parent of this transform
+        std::vector<Transform*> m_children; // the children of this transform
 
-		// Velocity tracking
-		Math::Matrix m_wvp_previous;
-	};
+        Math::Matrix m_wvp_previous;
+    };
 }

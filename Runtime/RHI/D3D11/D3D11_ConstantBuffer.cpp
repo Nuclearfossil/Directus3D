@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,9 +20,9 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //= INCLUDES =====================
+#include "Spartan.h"
+#include "../RHI_Implementation.h"
 #include "../RHI_ConstantBuffer.h"
-#include <d3d11.h>
-#include "../../Logging/Log.h"
 #include "../RHI_Device.h"
 //================================
 
@@ -30,67 +30,78 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 using namespace std;
 //==================
 
-namespace Directus
+namespace Spartan
 {
-	RHI_ConstantBuffer::RHI_ConstantBuffer(shared_ptr<RHI_Device> rhiDevice, unsigned int size)
-	{
-		m_rhiDevice = rhiDevice;
-		if (!m_rhiDevice || !m_rhiDevice->GetDevice<ID3D11Device>())
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return;
-		}
+    void RHI_ConstantBuffer::_destroy()
+    {
+        d3d11_utility::release(*reinterpret_cast<ID3D11Buffer**>(&m_buffer));
+    }
 
-		D3D11_BUFFER_DESC bufferDesc;
-		ZeroMemory(&bufferDesc, sizeof(bufferDesc));
-		bufferDesc.ByteWidth			= size;
-		bufferDesc.Usage				= D3D11_USAGE_DYNAMIC;
-		bufferDesc.BindFlags			= D3D11_BIND_CONSTANT_BUFFER;
-		bufferDesc.CPUAccessFlags		= D3D11_CPU_ACCESS_WRITE;
-		bufferDesc.MiscFlags			= 0;
-		bufferDesc.StructureByteStride	= 0;
+    RHI_ConstantBuffer::RHI_ConstantBuffer(const std::shared_ptr<RHI_Device>& rhi_device, const string& name, bool is_dynamic /*= false*/)
+    {
+        m_rhi_device    = rhi_device;
+        m_name          = name;
+        m_is_dynamic    = false; // D3D11 doesn't do that
+    }
 
-		auto result = m_rhiDevice->GetDevice<ID3D11Device>()->CreateBuffer(&bufferDesc, nullptr, (ID3D11Buffer**)&m_buffer);
-		if (FAILED(result))
-		{
-			LOG_ERROR("Failed to create constant buffer");
-			return;
-		}
-	}
+    void* RHI_ConstantBuffer::Map()
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device_context || !m_buffer)
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return nullptr;
+        }
 
-	RHI_ConstantBuffer::~RHI_ConstantBuffer()
-	{
-		SafeRelease((ID3D11Buffer*)m_buffer);
-	}
+        D3D11_MAPPED_SUBRESOURCE mapped_resource;
+        const auto result = m_rhi_device->GetContextRhi()->device_context->Map(static_cast<ID3D11Buffer*>(m_buffer), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource);
+        if (FAILED(result))
+        {
+            LOG_ERROR("Failed to map constant buffer.");
+            return nullptr;
+        }
 
-	void* RHI_ConstantBuffer::Map()
-	{
-		if (!m_rhiDevice || !m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>() || !m_buffer)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return nullptr;
-		}
+        return mapped_resource.pData;
+    }
 
-		D3D11_MAPPED_SUBRESOURCE mappedResource;
-		HRESULT result = m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>()->Map((ID3D11Buffer*)m_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
-		if (FAILED(result))
-		{
-			LOG_ERROR("Failed to map constant buffer.");
-			return nullptr;
-		}
+    bool RHI_ConstantBuffer::Unmap(const uint64_t offset /*= 0*/, const uint64_t size /*= 0*/)
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device_context || !m_buffer)
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return false;
+        }
 
-		return mappedResource.pData;
-	}
+        m_rhi_device->GetContextRhi()->device_context->Unmap(static_cast<ID3D11Buffer*>(m_buffer), 0);
+        return true;
+    }
 
-	bool RHI_ConstantBuffer::Unmap()
-	{
-		if (!m_rhiDevice || !m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>() || !m_buffer)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return false;
-		}
+    bool RHI_ConstantBuffer::_create()
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device)
+        {
+            LOG_ERROR_INVALID_PARAMETER();
+            return false;
+        }
 
-		m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>()->Unmap((ID3D11Buffer*)m_buffer, 0);
-		return true;
-	}
+        // Destroy previous buffer
+        _destroy();
+
+        D3D11_BUFFER_DESC buffer_desc;
+        ZeroMemory(&buffer_desc, sizeof(buffer_desc));
+        buffer_desc.ByteWidth            = static_cast<UINT>(m_stride);
+        buffer_desc.Usage                = D3D11_USAGE_DYNAMIC;
+        buffer_desc.BindFlags            = D3D11_BIND_CONSTANT_BUFFER;
+        buffer_desc.CPUAccessFlags        = D3D11_CPU_ACCESS_WRITE;
+        buffer_desc.MiscFlags            = 0;
+        buffer_desc.StructureByteStride = 0;
+
+        const auto result = m_rhi_device->GetContextRhi()->device->CreateBuffer(&buffer_desc, nullptr, reinterpret_cast<ID3D11Buffer**>(&m_buffer));
+        if (FAILED(result))
+        {
+            LOG_ERROR("Failed to create constant buffer");
+            return false;
+        }
+
+        return true;
+    }
 }

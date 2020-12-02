@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,186 +19,283 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ===================
+//= INCLUDES ======================
+#include "Spartan.h"
 #include "ResourceCache.h"
+#include "ProgressReport.h"
+#include "Import/ImageImporter.h"
+#include "Import/ModelImporter.h"
+#include "Import/FontImporter.h"
+#include "../World/World.h"
 #include "../World/Entity.h"
-#include "../Core/EventSystem.h"
-//==============================
+#include "../IO/FileStream.h"
+#include "../RHI/RHI_Texture2D.h"
+#include "../RHI/RHI_TextureCube.h"
+#include "../Audio/AudioClip.h"
+#include "../Rendering/Model.h"
+//=================================
 
 //= NAMESPACES ================
 using namespace std;
-using namespace Directus::Math;
+using namespace Spartan::Math;
 //=============================
 
-namespace Directus
+namespace Spartan
 {
-	ResourceCache::ResourceCache(Context* context) : ISubsystem(context)
-	{
-		// Add engine standard resource directories
-		AddStandardResourceDirectory(Resource_Texture, "Standard Assets//Textures//");
-		AddStandardResourceDirectory(Resource_Font,		"Standard Assets//Fonts//");
-		AddStandardResourceDirectory(Resource_Shader,	"Standard Assets//Shaders//");
-		AddStandardResourceDirectory(Resource_Cubemap,	"Standard Assets//Cubemaps//");
-		AddStandardResourceDirectory(Resource_Script,	"Standard Assets//Scripts//");
-		AddStandardResourceDirectory(Resource_Model,	"Standard Assets//Models//");
-		AddStandardResourceDirectory(Resource_Material, "Standard Assets//Materials//");
+    ResourceCache::ResourceCache(Context* context) : ISubsystem(context)
+    {
+        const string data_dir = "Data\\";
 
-		// Add project directory
-		SetProjectDirectory("Project//");
+        // Add engine standard resource directories
+        AddDataDirectory(Asset_Cubemaps,        data_dir + "environment");
+        AddDataDirectory(Asset_Fonts,            data_dir + "fonts");
+        AddDataDirectory(Asset_Icons,            data_dir + "icons");
+        AddDataDirectory(Asset_Scripts,            data_dir + "scripts");
+        AddDataDirectory(Asset_ShaderCompiler,    data_dir + "shader_compiler");    
+        AddDataDirectory(Asset_Shaders,            data_dir + "shaders");
+        AddDataDirectory(Asset_Textures,        data_dir + "textures");
 
-		// Subscribe to events
-		SUBSCRIBE_TO_EVENT(Event_World_Unload, EVENT_HANDLER(Clear));
-	}
+        // Create project directory
+        SetProjectDirectory("Project/");
 
-	ResourceCache::~ResourceCache()
-	{
-		// Unsubscribe from event
-		UNSUBSCRIBE_FROM_EVENT(Event_World_Unload, EVENT_HANDLER(Clear));
-		Clear();
-	}
+        // Subscribe to events
+        SUBSCRIBE_TO_EVENT(EventType::WorldSave,    EVENT_HANDLER(SaveResourcesToFiles));
+        SUBSCRIBE_TO_EVENT(EventType::WorldLoad,    EVENT_HANDLER(LoadResourcesFromFiles));
+        SUBSCRIBE_TO_EVENT(EventType::WorldUnload,    EVENT_HANDLER(Clear));
+    }
 
-	bool ResourceCache::Initialize()
-	{
-		// Importers
-		m_imageImporter = make_shared<ImageImporter>(m_context);
-		m_modelImporter = make_shared<ModelImporter>(m_context);
-		m_fontImporter	= make_shared<FontImporter>(m_context);
-		return true;
-	}
+    ResourceCache::~ResourceCache()
+    {
+        // Unsubscribe from event
+        UNSUBSCRIBE_FROM_EVENT(EventType::WorldUnload, EVENT_HANDLER(Clear));
+        Clear();
+    }
 
-	bool ResourceCache::IsCached(const string& resourceName, Resource_Type resourceType /*= Resource_Unknown*/)
-	{
-		if (resourceName == NOT_ASSIGNED)
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return false;
-		}
+    bool ResourceCache::Initialize()
+    {
+        // Importers
+        m_importer_image    = make_shared<ImageImporter>(m_context);
+        m_importer_model    = make_shared<ModelImporter>(m_context);
+        m_importer_font        = make_shared<FontImporter>(m_context);
+        return true;
+    }
 
-		for (const auto& resource : m_resourceGroups[resourceType])
-		{
-			if (resourceName == resource->GetResourceName())
-				return true;
-		}
+    bool ResourceCache::IsCached(const string& resource_name, const ResourceType resource_type /*= Resource_Unknown*/)
+    {
+        if (resource_name.empty())
+        {
+            LOG_ERROR_INVALID_PARAMETER();
+            return false;
+        }
 
-		return false;
-	}
+        for (const auto& resource : m_resource_groups[resource_type])
+        {
+            if (resource_name == resource->GetResourceName())
+                return true;
+        }
 
-	shared_ptr<IResource>& ResourceCache::GetByName(const string& name, Resource_Type type)
-	{
-		for (auto& resource : m_resourceGroups[type])
-		{
-			if (name == resource->GetResourceName())
-				return resource;
-		}
+        return false;
+    }
 
-		return m_emptyResource;
-	}
+    shared_ptr<IResource>& ResourceCache::GetByName(const string& name, const ResourceType type)
+    {
+        for (auto& resource : m_resource_groups[type])
+        {
+            if (name == resource->GetResourceName())
+                return resource;
+        }
 
-	vector<shared_ptr<IResource>> ResourceCache::GetByType(Resource_Type type /*= Resource_Unknown*/)
-	{
-		vector<shared_ptr<IResource>> resources;
+        static shared_ptr<IResource> empty;
+        return empty;
+    }
 
-		if (type == Resource_Unknown)
-		{
-			for (const auto& resourceGroup : m_resourceGroups)
-			{
-				resources.insert(resources.end(), resourceGroup.second.begin(), resourceGroup.second.end());
-			}
-		}
-		else
-		{
-			resources = m_resourceGroups[type];
-		}
+    vector<shared_ptr<IResource>> ResourceCache::GetByType(const ResourceType type /*= ResourceType::Unknown*/)
+    {
+        vector<shared_ptr<IResource>> resources;
 
-		return resources;
-	}
+        if (type == ResourceType::Unknown)
+        {
+            for (const auto& resource_group : m_resource_groups)
+            {
+                resources.insert(resources.end(), resource_group.second.begin(), resource_group.second.end());
+            }
+        }
+        else
+        {
+            resources = m_resource_groups[type];
+        }
 
-	unsigned int ResourceCache::GetMemoryUsage(Resource_Type type /*= Resource_Unknown*/)
-	{
-		unsigned int size = 0;
+        return resources;
+    }
 
-		if (type = Resource_Unknown)
-		{
-			for (const auto& group : m_resourceGroups)
-			{
-				for (const auto& resource : group.second)
-				{
-					if (!resource)
-						continue;
+    void ResourceCache::SaveResourcesToFiles()
+    {
+        // Start progress report
+        ProgressReport::Get().Reset(g_progress_resource_cache);
+        ProgressReport::Get().SetIsLoading(g_progress_resource_cache, true);
+        ProgressReport::Get().SetStatus(g_progress_resource_cache, "Loading resources...");
 
-					size += resource->GetMemoryUsage();
-				}
-			}
-		}
-		else
-		{
-			for (const auto& resource : m_resourceGroups[type])
-			{
-				size += resource->GetMemoryUsage();
-			}
-		}
+        // Create resource list file
+        string file_path = GetProjectDirectoryAbsolute() + m_context->GetSubsystem<World>()->GetName() + "_resources.dat";
+        auto file = make_unique<FileStream>(file_path, FileStream_Write);
+        if (!file->IsOpen())
+        {
+            LOG_ERROR_GENERIC_FAILURE();
+            return;
+        }
 
-		return size;
-	}
+        const auto resource_count = GetResourceCount();
+        ProgressReport::Get().SetJobCount(g_progress_resource_cache, resource_count);
 
-	void ResourceCache::GetResourceFilePaths(std::vector<std::string>& filePaths)
-	{
-		for (const auto& resourceGroup : m_resourceGroups)
-		{
-			for (const auto& resource : resourceGroup.second)
-			{
-				filePaths.emplace_back(resource->GetResourceFilePath());
-			}
-		}
-	}
+        // Save resource count
+        file->Write(resource_count);
 
-	void ResourceCache::SaveResourcesToFiles()
-	{
-		for (const auto& resourceGroup : m_resourceGroups)
-		{
-			for (const auto& resource : resourceGroup.second)
-			{
-				if (!resource->HasFilePath())
-					continue;
+        // Save all the currently used resources to disk
+        for (const auto& resource_group : m_resource_groups)
+        {
+            for (const auto& resource : resource_group.second)
+            {
+                if (!resource->HasFilePathNative())
+                    continue;
 
-				resource->SaveToFile(resource->GetResourceFilePath());
-			}
-		}
-	}
+                // Save file path
+                file->Write(resource->GetResourceFilePathNative());
+                // Save type
+                file->Write(static_cast<uint32_t>(resource->GetResourceType()));
+                // Save resource (to a dedicated file)
+                resource->SaveToFile(resource->GetResourceFilePathNative());
 
-	unsigned int ResourceCache::GetResourceCountByType(Resource_Type type)
-	{
-		return (unsigned int)GetByType(type).size();
-	}
+                // Update progress
+                ProgressReport::Get().IncrementJobsDone(g_progress_resource_cache);
+            }
+        }
 
-	void ResourceCache::AddStandardResourceDirectory(Resource_Type type, const string& directory)
-	{
-		m_standardResourceDirectories[type] = directory;
-	}
+        // Finish with progress report
+        ProgressReport::Get().SetIsLoading(g_progress_resource_cache, false);
+    }
 
-	const string& ResourceCache::GetStandardResourceDirectory(Resource_Type type)
-	{
-		for (auto& directory : m_standardResourceDirectories)
-		{
-			if (directory.first == type)
-				return directory.second;
-		}
+    void ResourceCache::LoadResourcesFromFiles()
+    {
+        // Open resource list file
+        auto file_path = GetProjectDirectoryAbsolute() + m_context->GetSubsystem<World>()->GetName() + "_resources.dat";
+        auto file = make_unique<FileStream>(file_path, FileStream_Read);
+        if (!file->IsOpen())
+            return;
+        
+        // Load resource count
+        const auto resource_count = file->ReadAs<uint32_t>();
 
-		return NOT_ASSIGNED;
-	}
+        for (uint32_t i = 0; i < resource_count; i++)
+        {
+            // Load resource file path
+            auto file_path = file->ReadAs<string>();
 
-	void ResourceCache::SetProjectDirectory(const string& directory)
-	{
-		if (!FileSystem::DirectoryExists(directory))
-		{
-			FileSystem::CreateDirectory_(directory);
-		}
+            // Load resource type
+            const auto type = static_cast<ResourceType>(file->ReadAs<uint32_t>());
 
-		m_projectDirectory = directory;
-	}
+            switch (type)
+            {
+            case ResourceType::Model:
+                Load<Model>(file_path);
+                break;
+            case ResourceType::Material:
+                Load<Material>(file_path);
+                break;
+            case ResourceType::Texture:
+                Load<RHI_Texture>(file_path);
+                break;
+            case ResourceType::Texture2d:
+                Load<RHI_Texture2D>(file_path);
+                break;
+            case ResourceType::TextureCube:
+                Load<RHI_TextureCube>(file_path);
+                break;
+            case ResourceType::Audio:
+                Load<AudioClip>(file_path);
+                break;
+            }
+        }
+    }
 
-	string ResourceCache::GetProjectDirectoryAbsolute()
-	{
-		return FileSystem::GetWorkingDirectory() + m_projectDirectory;
-	}
+    uint64_t ResourceCache::GetMemoryUsageCpu(ResourceType type /*= Resource_Unknown*/)
+    {
+        uint64_t size = 0;
+
+        if (type == ResourceType::Unknown)
+        {
+            for (const auto& group : m_resource_groups)
+            {
+                for (const auto& resource : group.second)
+                {
+                    if (Spartan_Object* object = dynamic_cast<Spartan_Object*>(resource.get()))
+                    {
+                        size += object->GetSizeCpu();
+                    }
+                }
+            }
+        }
+        else
+        {
+            for (const auto& resource : m_resource_groups[type])
+            {
+                if (Spartan_Object* object = dynamic_cast<Spartan_Object*>(resource.get()))
+                {
+                    size += object->GetSizeCpu();
+                }
+            }
+        }
+
+        return size;
+    }
+
+    uint64_t ResourceCache::GetMemoryUsageGpu(ResourceType type /*= Resource_Unknown*/)
+    {
+        uint64_t size = 0;
+
+        for (const auto& resource : m_resource_groups[type])
+        {
+            if (Spartan_Object* object = dynamic_cast<Spartan_Object*>(resource.get()))
+            {
+                size += object->GetSizeGpu();
+            }
+        }
+
+        return size;
+    }
+
+    uint32_t ResourceCache::GetResourceCount(const ResourceType type)
+    {
+        return static_cast<uint32_t>(GetByType(type).size());
+    }
+
+    void ResourceCache::AddDataDirectory(const Asset_Type type, const string& directory)
+    {
+        m_standard_resource_directories[type] = directory;
+    }
+
+    string ResourceCache::GetDataDirectory(const Asset_Type type)
+    {
+        for (auto& directory : m_standard_resource_directories)
+        {
+            if (directory.first == type)
+                return directory.second;
+        }
+
+        return "";
+    }
+
+    void ResourceCache::SetProjectDirectory(const string& directory)
+    {
+        if (!FileSystem::Exists(directory))
+        {
+            FileSystem::CreateDirectory_(directory);
+        }
+
+        m_project_directory = directory;
+    }
+
+    string ResourceCache::GetProjectDirectoryAbsolute() const
+    {
+        return FileSystem::GetWorkingDirectory() + "/" + m_project_directory;
+    }
 }

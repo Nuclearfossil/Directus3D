@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,30 +21,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
+//= INCLUDES ===========================
 #include <memory>
-#include "../Core/EngineDefs.h"
-//=============================
+#include "../Core/Spartan_Definitions.h"
+//======================================
 
-namespace Directus
+namespace Spartan
 {
-	class Entity;
+    class Entity;
 
-	namespace Math
-	{
-		class ENGINE_CLASS RayHit
-		{
-		public:
-			RayHit(std::shared_ptr<Entity> entity, float distance, bool inside)
-			{
-				m_entity		= entity;
-				m_distance	= distance;
-				m_inside	= inside;
-			};
+    namespace Math
+    {
+        class SPARTAN_CLASS RayHit
+        {
+        public:
+            RayHit(const std::shared_ptr<Entity>& entity, const Vector3& position, float distance, bool is_inside)
+            {
+                m_entity    = entity;
+                m_position  = position;
+                m_distance  = distance;
+                m_inside    = is_inside;
+            };
 
-			std::shared_ptr<Entity> m_entity;
-			float m_distance;
-			bool m_inside;
-		};
-	}
+            std::shared_ptr<Entity> m_entity;
+            Vector3 m_position;
+            float m_distance;
+            bool m_inside;
+        };
+    }
 }

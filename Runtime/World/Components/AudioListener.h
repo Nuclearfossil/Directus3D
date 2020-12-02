@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -25,22 +25,22 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include "IComponent.h"
 //=====================
 
-namespace Directus
+namespace Spartan
 {
-	class Audio;
+    class Audio;
 
-	class ENGINE_CLASS AudioListener : public IComponent
-	{
-	public:
-		AudioListener(Context* context, Entity* entity, Transform* transform);
-		~AudioListener();
+    class SPARTAN_CLASS AudioListener : public IComponent
+    {
+    public:
+        AudioListener(Context* context, Entity* entity, uint32_t id = 0);
+        ~AudioListener() = default;
 
-		//= COMPONENT ===============
-		void OnInitialize() override;
-		void OnTick() override;
-		//===========================
+        //= COMPONENT =========================
+        void OnInitialize() override;
+        void OnTick(float delta_time) override;
+        //=====================================
 
-	private:
-		Audio* m_audio;
-	};
+    private:
+        Audio* m_audio;
+    };
 }

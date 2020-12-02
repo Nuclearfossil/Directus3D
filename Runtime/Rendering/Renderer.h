@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,383 +21,316 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =====================
-#include <memory>
-#include <vector>
+//= INCLUDES ========================
 #include <unordered_map>
+#include <array>
+#include <atomic>
+#include "Renderer_ConstantBuffers.h"
+#include "Renderer_Enums.h"
+#include "Material.h"
 #include "../Core/ISubsystem.h"
-#include "../RHI/RHI_Definition.h"
-#include "../RHI/RHI_Pipeline.h"
-#include "../Math/Matrix.h"
-#include "../Math/Vector2.h"
 #include "../Math/Rectangle.h"
-#include "../Core/Settings.h"
-//================================
+#include "../RHI/RHI_Definition.h"
+#include "../RHI/RHI_Viewport.h"
+#include "../RHI/RHI_Vertex.h"
+//===================================
 
-namespace Directus
+namespace Spartan
 {
-	class Entity;
-	class Camera;
-	class Skybox;
-	class Light;
-	class GBuffer;
-	class LightShader;
-	class ResourceCache;
-	class Font;
-	class Variant;
-	class Grid;
-	class Transform_Gizmo;
-	namespace Math
-	{
-		class BoundingBox;
-		class Frustum;
-	}
+    // Forward declarations
+    class Entity;
+    class Camera;
+    class Light;
+    class ResourceCache;
+    class Font;
+    class Variant;
+    class Grid;
+    class Transform_Gizmo;
+    class Profiler;
 
-	enum Renderer_Option : unsigned long
-	{
-		Render_Gizmo_AABB						= 1UL << 0,
-		Render_Gizmo_PickingRay					= 1UL << 1,
-		Render_Gizmo_Grid						= 1UL << 2,
-		Render_Gizmo_Transform					= 1UL << 3,
-		Render_Gizmo_Lights						= 1UL << 4,
-		Render_Gizmo_PerformanceMetrics			= 1UL << 5,
-		Render_Gizmo_Physics					= 1UL << 6,
-		Render_PostProcess_Bloom				= 1UL << 7,
-		Render_PostProcess_FXAA					= 1UL << 8,
-		Render_PostProcess_SSAO					= 1UL << 9,
-		Render_PostProcess_SSR					= 1UL << 10,
-		Render_PostProcess_TAA					= 1UL << 11,
-		Render_PostProcess_MotionBlur			= 1UL << 12,
-		Render_PostProcess_Sharpening			= 1UL << 13,
-		Render_PostProcess_ChromaticAberration	= 1UL << 14,
-		Render_PostProcess_Dithering			= 1UL << 15
-	};
+    namespace Math
+    {
+        class BoundingBox;
+        class Frustum;
+    }
 
-	enum RendererDebug_Buffer
-	{
-		RendererDebug_None,
-		RendererDebug_Albedo,
-		RendererDebug_Normal,
-		RendererDebug_Material,
-		RendererDebug_Velocity,
-		RendererDebug_Depth,
-		RendererDebug_SSAO
-	};
+    class SPARTAN_CLASS Renderer : public ISubsystem
+    {
+    public:
+        // Constants
+        const uint32_t m_resolution_shadow_min  = 128;
+        const float m_gizmo_size_max            = 2.0f;
+        const float m_gizmo_size_min            = 0.1f;
+        const float m_thread_group_count        = 8.0f;
+        const float m_depth_bias                = 0.004f; // bias that's applied directly into the depth buffer
+        const float m_depth_bias_clamp          = 0.0f;
+        const float m_depth_bias_slope_scaled   = 2.0f;
+        #define DEBUG_COLOR                     Math::Vector4(0.41f, 0.86f, 1.0f, 1.0f)
 
-	enum ToneMapping_Type
-	{
-		ToneMapping_Off,
-		ToneMapping_ACES,
-		ToneMapping_Reinhard,
-		ToneMapping_Uncharted2
-	};
+        Renderer(Context* context);
+        ~Renderer();
 
-	enum RenderableType
-	{
-		Renderable_ObjectOpaque,
-		Renderable_ObjectTransparent,
-		Renderable_Light,
-		Renderable_Camera
-	};
+        //= ISubsystem ======================
+        bool Initialize() override;
+        void Tick(float delta_time) override;
+        //===================================
 
-	class ENGINE_CLASS Renderer : public ISubsystem
-	{
-	public:
-		Renderer(Context* context);
-		~Renderer();
+        // Debug draw
+        void DrawDebugTick(const float delta_time);
+        void DrawDebugLine(const Math::Vector3& from, const Math::Vector3& to, const Math::Vector4& color_from = DEBUG_COLOR, const Math::Vector4& color_to = DEBUG_COLOR, const float duration = 0.0f, const bool depth = true);
+        void DrawDebugTriangle(const Math::Vector3& v0, const Math::Vector3& v1, const Math::Vector3& v2, const Math::Vector4& color = DEBUG_COLOR, const float duration = 0.0f, const bool depth = true);
+        void DrawDebugRectangle(const Math::Rectangle& rectangle, const Math::Vector4& color = DEBUG_COLOR, const float duration = 0.0f, const bool depth = true);
+        void DrawDebugBox(const Math::BoundingBox& box, const Math::Vector4& color = DEBUG_COLOR, const float duration = 0.0f, const bool depth = true);
 
-		//= Subsystem =============
-		bool Initialize() override;
-		void Tick() override;
-		//=========================
+        // Viewport
+        const RHI_Viewport& GetViewport()           const { return m_viewport; }
+        const Math::Vector2& GetViewportOffset()    const { return m_viewport_editor_offset; }
+        void SetViewport(float width, float height, float offset_x = 0, float offset_y = 0);
 
-		//= RENDER MODE ======================================================
-		// Enables an render mode flag
-		void Flags_Enable(Renderer_Option flag)		{ m_flags |= flag; }
-		// Removes an render mode flag
-		void Flags_Disable(Renderer_Option flag)	{ m_flags &= ~flag; }
-		// Returns whether render mode flag is set
-		bool Flags_IsSet(Renderer_Option flag)		{ return m_flags & flag; }
-		//====================================================================
+        // Resolution
+        const Math::Vector2& GetResolution() const { return m_resolution; }
+        void SetResolution(uint32_t width, uint32_t height);
 
-		//= LINE RENDERING ============================================================================================================================================================
-		#define DebugColor Math::Vector4(0.41f, 0.86f, 1.0f, 1.0f)
-		void DrawLine(const Math::Vector3& from, const Math::Vector3& to, const Math::Vector4& color_from = DebugColor, const Math::Vector4& color_to = DebugColor, bool depth = true);
-		void DrawBox(const Math::BoundingBox& box, const Math::Vector4& color = DebugColor, bool depth = true);
-		//=============================================================================================================================================================================
+        // Resolution
+        bool GetIsFullscreen() const { return m_is_fullscreen; }
+        void SetIsFullscreen(const bool is_fullscreen) { m_is_fullscreen = is_fullscreen; }
 
-		//= SWAPCHAIN =================================================
-		bool SwapChain_Resize(unsigned int width, unsigned int height);
-		bool SwapChain_SetAsRenderTarget();
-		bool SwapChain_Clear(const Math::Vector4& color);
-		bool SwapChain_Present();
-		//=============================================================
+        // Editor
+        float m_gizmo_transform_size    = 0.015f;
+        float m_gizmo_transform_speed   = 12.0f;
+        std::weak_ptr<Entity> SnapTransformGizmoTo(const std::shared_ptr<Entity>& entity) const;
 
-		//= VIEWPORT - INTERNAL ==================================================
-		const RHI_Viewport& GetViewport()				{ return m_viewport; }
-		void SetViewport(const RHI_Viewport& viewport)	{ m_viewport = viewport; }
-		Math::Vector2 viewport_editorOffset;
-		//========================================================================
+        // Debug/Visualise a render target
+        void SetRenderTargetDebug(const uint64_t render_target_debug)   { m_render_target_debug = render_target_debug; }
+        auto GetRenderTargetDebug() const                               { return m_render_target_debug; }
 
-		//= RESOLUTION - INTERNAL ===================================
-		const Math::Vector2& GetResolution() { return m_resolution; }
-		void SetResolution(unsigned int width, unsigned int height);
-		//===========================================================
+        // Depth
+        auto GetClearDepth()                { return GetOption(Render_ReverseZ) ? m_viewport.depth_min : m_viewport.depth_max; }
+        auto GetComparisonFunction() const  { return GetOption(Render_ReverseZ) ? RHI_Comparison_GreaterEqual : RHI_Comparison_LessEqual; }
 
-		//= MISC ==========================================================================
-		void* GetFrameShaderResource();
-		const std::shared_ptr<RHI_Device>& GetRHIDevice() { return m_rhiDevice; }
-		const std::shared_ptr<RHI_Pipeline>& GetRHIPipeline() { return m_rhiPipeline; }
-		static bool IsRendering() { return m_isRendering; }
-		uint64_t GetFrameNum() { return m_frameNum; }
-		std::shared_ptr<Camera> GetCamera() { return m_camera; }
-		unsigned int GetMaxResolution() { return m_maxResolution; }
-		//=================================================================================
+        // Environment
+        const std::shared_ptr<RHI_Texture>& GetEnvironmentTexture();
+        void SetEnvironmentTexture(const std::shared_ptr<RHI_Texture>& texture);
 
-		//= Graphics Settings ====================================================================================================================================================
-		ToneMapping_Type m_tonemapping	= ToneMapping_ACES;
-		float m_gamma					= 2.2f;
-		// FXAA
-		float m_fxaaSubPixel			= 1.25f;	// The amount of sub-pixel aliasing removal														- Algorithm's default: 0.75f
-		float m_fxaaEdgeThreshold		= 0.125f;	// Edge detection threshold. The minimum amount of local contrast required to apply algorithm.  - Algorithm's default: 0.166f
-		float m_fxaaEdgeThresholdMin	= 0.0312f;	// Darkness threshold. Trims the algorithm from processing darks								- Algorithm's default: 0.0833f
-		// Bloom
-		float m_bloomIntensity			= 0.02f;	// The intensity of the bloom
-		// Sharpening
-		float m_sharpenStrength			= 1.0f;		// Strength of the sharpening
-		float m_sharpenClamp			= 0.35f;	// Limits maximum amount of sharpening a pixel receives											- Algorithm's default: 0.035f
-		// Motion Blur
-		float m_motionBlurStrength		= 2.0f;		// Strength of the motion blur
-		//========================================================================================================================================================================
+        // Options
+        uint64_t GetOptions()                           const { return m_options; }
+        void SetOptions(const uint64_t options)               { m_options = options; }
+        bool GetOption(const Renderer_Option option)    const { return m_options & option; }
+        void SetOption(Renderer_Option option, bool enable);
+        
+        // Options values
+        template<typename T>
+        T GetOptionValue(const Renderer_Option_Value option) { return static_cast<T>(m_option_values[option]); }
+        void SetOptionValue(Renderer_Option_Value option, float value);
 
-		//= Gizmo Settings ======================
-		float m_gizmo_transform_size	= 0.015f;
-		float m_gizmo_transform_speed	= 12.0f;
-		//=======================================
-		
-		// DEBUG BUFFER ===============================================================
-		void SetDebugBuffer(RendererDebug_Buffer buffer)	{ m_debugBuffer = buffer; }
-		RendererDebug_Buffer GetDebugBuffer()				{ return m_debugBuffer; }
-		//=============================================================================
+        // Swapchain
+        RHI_SwapChain* GetSwapChain() const { return m_swap_chain.get(); }
+        bool Flush();
 
-	private:
-		void CreateDepthStencilStates();
-		void CreateRasterizerStates();
-		void CreateBlendStates();
-		void CreateFonts();
-		void CreateTextures();
-		void CreateShaders();
-		void CreateSamplers();
-		void CreateRenderTextures();
-		void SetDefault_Pipeline_State();
-		void SetDefault_Buffer(	
-			unsigned int resolutionWidth,
-			unsigned int resolutionHeight,
-			const Math::Matrix& mMVP			= Math::Matrix::Identity,
-			float blur_sigma					= 0.0f,
-			const Math::Vector2& blur_direction	= Math::Vector2::Zero
-		);
-		void Renderables_Acquire(const Variant& renderables);
-		void Renderables_Sort(std::vector<Entity*>* renderables);
-		std::shared_ptr<RHI_RasterizerState>& GetRasterizerState(RHI_Cull_Mode cullMode, RHI_Fill_Mode fillMode);
+        // Default textures
+        RHI_Texture* GetDefaultTextureWhite()       const { return m_default_tex_white.get(); }
+        RHI_Texture* GetDefaultTextureBlack()       const { return m_default_tex_black.get(); }
+        RHI_Texture* GetDefaultTextureTransparent() const { return m_default_tex_transparent.get(); }
 
-		//= PASSES ==============================================================================================================================================
-		void Pass_DepthDirectionalLight(Light* directionalLight);
-		void Pass_GBuffer();
-		void Pass_PreLight(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut, std::shared_ptr<RHI_RenderTexture>& texOut2);
-		void Pass_Light(std::shared_ptr<RHI_RenderTexture>& texShadows, std::shared_ptr<RHI_RenderTexture>& texSSAO, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_PostLight(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_TAA(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_Transparent(std::shared_ptr<RHI_RenderTexture>& texOut);
-		bool Pass_DebugBuffer(std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_ToneMapping(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_GammaCorrection(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_FXAA(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_Sharpening(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_ChromaticAberration(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_MotionBlur(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_Dithering(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_Bloom(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_BlurBox(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut, float sigma);
-		void Pass_BlurGaussian(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut, float sigma);
-		void Pass_BlurBilateralGaussian(std::shared_ptr<RHI_RenderTexture>& texIn, std::shared_ptr<RHI_RenderTexture>& texOut, float sigma, float pixelStride);
-		void Pass_SSAO(std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_ShadowMapping(std::shared_ptr<RHI_RenderTexture>& texOut, Light* inDirectionalLight);
-		void Pass_Lines(std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_Gizmos(std::shared_ptr<RHI_RenderTexture>& texOut);
-		void Pass_PerformanceMetrics(std::shared_ptr<RHI_RenderTexture>& texOut);
-		//=======================================================================================================================================================
+        // Global shader resources
+        void SetGlobalShaderObjectTransform(RHI_CommandList* cmd_list, const Math::Matrix& transform);
+        void SetGlobalSamplersAndConstantBuffers(RHI_CommandList* cmd_list) const;
 
-		//= RESOLUTION & VIEWPORT =======================================
-		Math::Vector2 m_resolution		= Math::Vector2(1920, 1080);
-		RHI_Viewport m_viewport			= RHI_Viewport(0, 0, 1920, 1080);
-		unsigned int m_maxResolution	= 16384;
-		//===============================================================
+        // Misc
+        const std::shared_ptr<RHI_Device>& GetRhiDevice()   const { return m_rhi_device; } 
+        RHI_PipelineCache* GetPipelineCache()               const { return m_pipeline_cache.get(); }
+        RHI_DescriptorCache* GetDescriptorCache()           const { return m_descriptor_cache.get(); }
+        RHI_Texture* GetFrameTexture()                      const { return m_render_targets.at(RendererRt::Frame_Ldr).get(); }
+        auto GetFrameNum()                                  const { return m_frame_num; }
+        const auto& GetCamera()                             const { return m_camera; }
+        auto IsInitialized()                                const { return m_initialized; }
+        auto& GetShaders()                                  const { return m_shaders; }
+        bool IsRendering()                                  const { return m_is_rendering; }
+        uint32_t GetMaxResolution() const;
 
-		//= RENDER TEXTURES ===========================================
-		// 1/1
-		std::shared_ptr<RHI_RenderTexture> m_renderTexFull_HDR_Light;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexFull_TAA_Current;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexFull_TAA_History;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexFull_HDR_Light2;
-		// 1/2
-		std::shared_ptr<RHI_RenderTexture> m_renderTexHalf_Shadows;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexHalf_SSAO;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexHalf_Spare;
-		// 1/4
-		std::shared_ptr<RHI_RenderTexture> m_renderTexQuarter_Blur1;
-		std::shared_ptr<RHI_RenderTexture> m_renderTexQuarter_Blur2;
-		//=============================================================
+        // Passes
+        void Pass_CopyToBackbuffer(RHI_CommandList* cmd_list);
 
-		//= SHADERS ===========================================
-		std::shared_ptr<RHI_Shader> m_vs_gbuffer;
-		std::shared_ptr<LightShader> m_vps_light;
-		std::shared_ptr<RHI_Shader> m_vps_depth;
-		std::shared_ptr<RHI_Shader> m_vps_color;
-		std::shared_ptr<RHI_Shader> m_vps_font;
-		std::shared_ptr<RHI_Shader> m_vps_shadowMapping;
-		std::shared_ptr<RHI_Shader> m_vps_ssao;
-		std::shared_ptr<RHI_Shader> m_vps_gizmoTransform;
-		std::shared_ptr<RHI_Shader> m_vps_transparent;
-		std::shared_ptr<RHI_Shader> m_vs_quad;
-		std::shared_ptr<RHI_Shader> m_ps_texture;
-		std::shared_ptr<RHI_Shader> m_ps_fxaa;
-		std::shared_ptr<RHI_Shader> m_ps_luma;	
-		std::shared_ptr<RHI_Shader> m_ps_taa;
-		std::shared_ptr<RHI_Shader> m_ps_motionBlur;
-		std::shared_ptr<RHI_Shader> m_ps_sharpening;
-		std::shared_ptr<RHI_Shader> m_ps_chromaticAberration;
-		std::shared_ptr<RHI_Shader> m_ps_blurBox;
-		std::shared_ptr<RHI_Shader> m_ps_blurGaussian;
-		std::shared_ptr<RHI_Shader> m_ps_blurGaussianBilateral;
-		std::shared_ptr<RHI_Shader> m_ps_bloomBright;
-		std::shared_ptr<RHI_Shader> m_ps_bloomBlend;
-		std::shared_ptr<RHI_Shader> m_ps_toneMapping;
-		std::shared_ptr<RHI_Shader> m_ps_gammaCorrection;
-		std::shared_ptr<RHI_Shader> m_ps_dithering;
-		std::shared_ptr<RHI_Shader> m_ps_debugNormal;
-		std::shared_ptr<RHI_Shader> m_ps_debugVelocity;
-		std::shared_ptr<RHI_Shader> m_ps_debugDepth;
-		std::shared_ptr<RHI_Shader> m_ps_debugSSAO;
-		//=====================================================
+    private:
+        // Resource creation
+        void CreateConstantBuffers();
+        void CreateDepthStencilStates();
+        void CreateRasterizerStates();
+        void CreateBlendStates();
+        void CreateFonts();
+        void CreateTextures();
+        void CreateShaders();
+        void CreateSamplers();
+        void CreateRenderTextures();
 
-		//= DEPTH-STENCIL STATES ======================================
-		std::shared_ptr<RHI_DepthStencilState> m_depthStencil_enabled;
-		std::shared_ptr<RHI_DepthStencilState> m_depthStencil_disabled;
-		//=============================================================
+        // Passes
+        void Pass_Main(RHI_CommandList* cmd_list);
+        void Pass_UpdateFrameBuffer(RHI_CommandList* cmd_list);
+        void Pass_LightDepth(RHI_CommandList* cmd_list, const Renderer_Object_Type object_type);
+        void Pass_DepthPrePass(RHI_CommandList* cmd_list);
+        void Pass_GBuffer(RHI_CommandList* cmd_list, const bool is_transparent_pass = false);
+        void Pass_Ssgi(RHI_CommandList* cmd_list);
+        void Pass_Hbao(RHI_CommandList* cmd_list);
+        void Pass_Ssr(RHI_CommandList* cmd_list);
+        void Pass_Light(RHI_CommandList* cmd_list, const bool is_transparent_pass = false);
+        void Pass_Composition(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_out, const bool is_transparent_pass = false);
+        void Pass_PostProcess(RHI_CommandList* cmd_list);
+        void Pass_TemporalAntialiasing(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        bool Pass_DebugBuffer(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_ToneMapping(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_GammaCorrection(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_FXAA(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in,    std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_FilmGrain(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_Sharpening(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_ChromaticAberration(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_MotionBlur(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_DepthOfField(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_Dithering(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_Bloom(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_BlurBox(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out, const float sigma, const float pixel_stride, const bool use_stencil);
+        void Pass_BlurGaussian(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out, const float sigma, const float pixel_stride = 1.0f);
+        void Pass_BlurBilateralGaussian(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_in, std::shared_ptr<RHI_Texture>& tex_out, const float sigma, const float pixel_stride = 1.0f, const bool use_stencil = false);
+        void Pass_Lines(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_Outline(RHI_CommandList* cmd_list, std::shared_ptr<RHI_Texture>& tex_out);
+        void Pass_Icons(RHI_CommandList* cmd_list, RHI_Texture* tex_out);
+        void Pass_TransformHandle(RHI_CommandList* cmd_list, RHI_Texture* tex_out);
+        void Pass_Text(RHI_CommandList* cmd_list, RHI_Texture* tex_out);
+        void Pass_BrdfSpecularLut(RHI_CommandList* cmd_list);
+        void Pass_Copy(RHI_CommandList* cmd_list, RHI_Texture* tex_in, RHI_Texture* tex_out);
 
-		//= BLEND STATES ================================
-		std::shared_ptr<RHI_BlendState> m_blend_enabled;
-		std::shared_ptr<RHI_BlendState> m_blend_disabled;
-		//===============================================
+        // Constant buffers
+        bool UpdateFrameBuffer(RHI_CommandList* cmd_list);
+        bool UpdateMaterialBuffer(RHI_CommandList* cmd_list);
+        bool UpdateUberBuffer(RHI_CommandList* cmd_list);
+        bool UpdateObjectBuffer(RHI_CommandList* cmd_list);
+        bool UpdateLightBuffer(RHI_CommandList* cmd_list, const Light* light);
 
-		//= RASTERIZER STATES ================================================
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullBack_solid;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullFront_solid;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullNone_solid;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullBack_wireframe;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullFront_wireframe;
-		std::shared_ptr<RHI_RasterizerState> m_rasterizer_cullNone_wireframe;
-		//====================================================================
+        // Misc
+        void RenderablesAcquire(const Variant& renderables);
+        void RenderablesSort(std::vector<Entity*>* renderables);
+        void ClearEntities();
 
-		//= SAMPLERS =========================================
-		std::shared_ptr<RHI_Sampler> m_samplerCompareDepth;
-		std::shared_ptr<RHI_Sampler> m_samplerPointClamp;
-		std::shared_ptr<RHI_Sampler> m_samplerBilinearClamp;
-		std::shared_ptr<RHI_Sampler> m_samplerBilinearWrap;
-		std::shared_ptr<RHI_Sampler> m_samplerTrilinearClamp;
-		std::shared_ptr<RHI_Sampler> m_samplerAnisotropicWrap;
-		//====================================================
+        // Render textures
+        std::unordered_map<RendererRt, std::shared_ptr<RHI_Texture>> m_render_targets;
+        std::vector<std::shared_ptr<RHI_Texture>> m_render_tex_bloom;
 
-		//= STANDARD TEXTURES ==================================
-		std::shared_ptr<RHI_Texture> m_texNoiseNormal;
-		std::shared_ptr<RHI_Texture> m_texWhite;
-		std::shared_ptr<RHI_Texture> m_texBlack;
-		std::shared_ptr<RHI_Texture> m_texLUT_IBL;
-		std::shared_ptr<RHI_Texture> m_gizmoTexLightDirectional;
-		std::shared_ptr<RHI_Texture> m_gizmoTexLightPoint;
-		std::shared_ptr<RHI_Texture> m_gizmoTexLightSpot;
-		//======================================================
+        // Standard textures
+        std::shared_ptr<RHI_Texture> m_default_tex_white;
+        std::shared_ptr<RHI_Texture> m_default_tex_black;
+        std::shared_ptr<RHI_Texture> m_default_tex_transparent;
+        std::shared_ptr<RHI_Texture> m_gizmo_tex_light_directional;
+        std::shared_ptr<RHI_Texture> m_gizmo_tex_light_point;
+        std::shared_ptr<RHI_Texture> m_gizmo_tex_light_spot;
 
-		//= LINE RENDERING ======================================
-		std::shared_ptr<RHI_VertexBuffer> m_vertexBufferLines;
-		std::vector<RHI_Vertex_PosCol> m_linesList_depthEnabled;
-		std::vector<RHI_Vertex_PosCol> m_linesList_depthDisabled;
-		//=======================================================
+        // Shaders
+        std::unordered_map<RendererShader, std::shared_ptr<RHI_Shader>> m_shaders;
 
-		//= EDITOR =======================================
-		std::unique_ptr<Transform_Gizmo> m_transformGizmo;
-		std::unique_ptr<Grid> m_grid;
-		Math::Rectangle m_gizmoRectLight;
-		//================================================
+        // Depth-stencil states
+        std::shared_ptr<RHI_DepthStencilState> m_depth_stencil_off_off;
+        std::shared_ptr<RHI_DepthStencilState> m_depth_stencil_off_on_r;
+        std::shared_ptr<RHI_DepthStencilState> m_depth_stencil_on_off_w;
+        std::shared_ptr<RHI_DepthStencilState> m_depth_stencil_on_off_r;
+        std::shared_ptr<RHI_DepthStencilState> m_depth_stencil_on_on_w;
 
-		//= CORE ===================================
-		std::shared_ptr<RHI_Device> m_rhiDevice;
-		std::shared_ptr<RHI_Pipeline> m_rhiPipeline;
-		std::unique_ptr<RHI_SwapChain> m_swapChain;
-		//==========================================
+        // Blend states 
+        std::shared_ptr<RHI_BlendState> m_blend_disabled;
+        std::shared_ptr<RHI_BlendState> m_blend_alpha;
+        std::shared_ptr<RHI_BlendState> m_blend_additive;
 
-		//= MISC ========================================================
-		Light* GetLightDirectional();
-		std::unique_ptr<GBuffer> m_gbuffer;	
-		Math::Rectangle m_quad;
-		std::unordered_map<RenderableType, std::vector<Entity*>> m_entities;
-		Math::Matrix m_view;
-		Math::Matrix m_viewBase;
-		Math::Matrix m_projection;
-		Math::Matrix m_projectionOrthographic;
-		Math::Matrix m_viewProjection;
-		Math::Matrix m_viewProjection_Orthographic;
-		float m_nearPlane;
-		float m_farPlane;
-		std::shared_ptr<Camera> m_camera;
-		std::shared_ptr<Skybox> m_skybox;
-		static bool m_isRendering;
-		std::unique_ptr<Font> m_font;	
-		unsigned long m_flags;
-		uint64_t m_frameNum;
-		bool m_isOddFrame;
-		Math::Vector2 m_taa_jitter;
-		Math::Vector2 m_taa_jitterPrevious;
-		Profiler* m_profiler;
-		RendererDebug_Buffer m_debugBuffer = RendererDebug_None;
-		//===============================================================
-		
-		// Global buffer (holds what is needed by almost every shader)
-		struct ConstantBuffer_Global
-		{
-			Math::Matrix mMVP;
-			Math::Matrix mView;
-			Math::Matrix mProjection;
-			Math::Matrix mProjectionOrtho;
-			Math::Matrix mViewProjection;
-			Math::Matrix mViewProjectionOrtho;
+        // Rasterizer states
+        std::shared_ptr<RHI_RasterizerState> m_rasterizer_cull_back_solid;
+        std::shared_ptr<RHI_RasterizerState> m_rasterizer_cull_back_wireframe;
+        std::shared_ptr<RHI_RasterizerState> m_rasterizer_light_point_spot;
+        std::shared_ptr<RHI_RasterizerState> m_rasterizer_light_directional;
 
-			float camera_near;
-			float camera_far;
-			Math::Vector2 resolution;
+        // Samplers
+        std::shared_ptr<RHI_Sampler> m_sampler_compare_depth;
+        std::shared_ptr<RHI_Sampler> m_sampler_point_clamp;
+        std::shared_ptr<RHI_Sampler> m_sampler_bilinear_clamp;
+        std::shared_ptr<RHI_Sampler> m_sampler_bilinear_wrap;
+        std::shared_ptr<RHI_Sampler> m_sampler_trilinear_clamp;
+        std::shared_ptr<RHI_Sampler> m_sampler_anisotropic_wrap;
 
-			Math::Vector3 camera_position;
-			float fxaa_subPixel;
+        // Line rendering
+        std::shared_ptr<RHI_VertexBuffer> m_vertex_buffer_lines;
+        std::vector<RHI_Vertex_PosCol> m_lines_depth_disabled;
+        std::vector<RHI_Vertex_PosCol> m_lines_depth_enabled;
+        std::vector<float> m_lines_depth_disabled_duration;
+        std::vector<float> m_lines_depth_enabled_duration;
 
-			float fxaa_edgeThreshold;
-			float fxaa_edgeThresholdMin;
-			Math::Vector2 blur_direction;
+        // Gizmos
+        std::unique_ptr<Transform_Gizmo> m_gizmo_transform;
+        std::unique_ptr<Grid> m_gizmo_grid;
+        Math::Rectangle m_gizmo_light_rect;
 
-			float blur_sigma;
-			float bloom_intensity;
-			float sharpen_strength;
-			float sharpen_clamp;
+        // Resolution & Viewport
+        Math::Vector2 m_resolution              = Math::Vector2::Zero;
+        RHI_Viewport m_viewport                 = RHI_Viewport(0, 0, 1920, 1080);
+        Math::Vector2 m_viewport_editor_offset  = Math::Vector2::Zero;
 
-			float motionBlur_strength;
-			float fps_current;
-			float fps_target;
-			float gamma;
+        // Options
+        uint64_t m_options = 0;
+        std::unordered_map<Renderer_Option_Value, float> m_option_values;
 
-			Math::Vector2 taa_jitterOffset;
-			float tonemapping;
-			float padding;
-		};
-		std::shared_ptr<RHI_ConstantBuffer> m_bufferGlobal;
-	};
+        // Misc
+        Math::Rectangle m_viewport_quad;
+        std::unique_ptr<Font> m_font;
+        Math::Vector2 m_taa_jitter          = Math::Vector2::Zero;
+        Math::Vector2 m_taa_jitter_previous = Math::Vector2::Zero;
+        uint64_t m_render_target_debug      = 0;
+        bool m_initialized                  = false;
+        bool m_is_fullscreen                = false;
+        float m_near_plane                  = 0.0f;
+        float m_far_plane                   = 0.0f;
+        uint64_t m_frame_num                = 0;
+        bool m_is_odd_frame                 = false;
+        std::atomic<bool> m_is_rendering    = false;
+        bool m_brdf_specular_lut_rendered   = false;
+        bool m_update_ortho_proj            = true;
+
+        // RHI Core
+        std::shared_ptr<RHI_Device> m_rhi_device;
+        std::shared_ptr<RHI_PipelineCache> m_pipeline_cache;
+        std::shared_ptr<RHI_DescriptorCache> m_descriptor_cache;
+
+        // Swapchain
+        static const uint8_t m_swap_chain_buffer_count = 3;
+        std::shared_ptr<RHI_SwapChain> m_swap_chain;
+
+        //= CONSTANT BUFFERS =====================================
+        BufferFrame m_buffer_frame_cpu;
+        BufferFrame m_buffer_frame_cpu_previous;
+        std::shared_ptr<RHI_ConstantBuffer> m_buffer_frame_gpu;
+        uint32_t m_buffer_frame_offset_index = 0;
+
+        BufferMaterial m_buffer_material_cpu;
+        BufferMaterial m_buffer_material_cpu_previous;
+        std::shared_ptr<RHI_ConstantBuffer> m_buffer_material_gpu;
+        uint32_t m_buffer_material_offset_index = 0;
+
+        BufferUber m_buffer_uber_cpu;
+        BufferUber m_buffer_uber_cpu_previous;
+        std::shared_ptr<RHI_ConstantBuffer> m_buffer_uber_gpu;
+        uint32_t m_buffer_uber_offset_index = 0;
+
+        BufferObject m_buffer_object_cpu;
+        BufferObject m_buffer_object_cpu_previous;
+        std::shared_ptr<RHI_ConstantBuffer> m_buffer_object_gpu;
+        uint32_t m_buffer_object_offset_index = 0;
+
+        BufferLight m_buffer_light_cpu;
+        BufferLight m_buffer_light_cpu_previous;
+        std::shared_ptr<RHI_ConstantBuffer> m_buffer_light_gpu;
+        uint32_t m_buffer_light_offset_index = 0;
+        //========================================================
+
+        // Entities and material references
+        std::unordered_map<Renderer_Object_Type, std::vector<Entity*>> m_entities;
+        std::array<Material*, m_max_material_instances> m_material_instances;    
+        std::shared_ptr<Camera> m_camera;
+
+        // Dependencies
+        Profiler* m_profiler            = nullptr;
+        ResourceCache* m_resource_cache = nullptr;
+    };
 }

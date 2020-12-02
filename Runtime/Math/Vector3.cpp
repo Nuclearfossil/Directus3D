@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,30 +20,37 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //= INCLUDES =======
-#include "Vector3.h"
+#include "Spartan.h"
 //==================
 
 //= NAMESPACES =====
 using namespace std;
 //==================
 
-namespace Directus::Math
+namespace Spartan::Math
 {
-	const Vector3 Vector3::Zero(0.0f, 0.0f, 0.0f);
-	const Vector3 Vector3::One(1.0f, 1.0f, 1.0f);
-	const Vector3 Vector3::Left(-1.0f, 0.0f, 0.0f);
-	const Vector3 Vector3::Right(1.0f, 0.0f, 0.0f);
-	const Vector3 Vector3::Up(0.0f, 1.0f, 0.0f);
-	const Vector3 Vector3::Down(0.0f, -1.0f, 0.0f);
-	const Vector3 Vector3::Forward(0.0f, 0.0f, 1.0f);
-	const Vector3 Vector3::Back(0.0f, 0.0f, -1.0f);		
-	const Vector3 Vector3::Infinity(numeric_limits<float>::infinity(), numeric_limits<float>::infinity(), numeric_limits<float>::infinity());
-	const Vector3 Vector3::InfinityNeg(-numeric_limits<float>::infinity(), -numeric_limits<float>::infinity(), -numeric_limits<float>::infinity());
+    const Vector3 Vector3::Zero(0.0f, 0.0f, 0.0f);
+    const Vector3 Vector3::One(1.0f, 1.0f, 1.0f);
+    const Vector3 Vector3::Left(-1.0f, 0.0f, 0.0f);
+    const Vector3 Vector3::Right(1.0f, 0.0f, 0.0f);
+    const Vector3 Vector3::Up(0.0f, 1.0f, 0.0f);
+    const Vector3 Vector3::Down(0.0f, -1.0f, 0.0f);
+    const Vector3 Vector3::Forward(0.0f, 0.0f, 1.0f);
+    const Vector3 Vector3::Backward(0.0f, 0.0f, -1.0f);        
+    const Vector3 Vector3::Infinity(numeric_limits<float>::infinity(), numeric_limits<float>::infinity(), numeric_limits<float>::infinity());
+    const Vector3 Vector3::InfinityNeg(-numeric_limits<float>::infinity(), -numeric_limits<float>::infinity(), -numeric_limits<float>::infinity());
 
-	string Vector3::ToString() const
-	{
-		char tempBuffer[200];
-		sprintf_s(tempBuffer, "X:%f, Y:%f, Z:%f", x, y, z);
-		return string(tempBuffer);
-	}
+    string Vector3::ToString() const
+    {
+        char buffer[200];
+        sprintf_s(buffer, "X:%f, Y:%f, Z:%f", x, y, z);
+        return string(buffer);
+    }
+
+    Vector3::Vector3(const Vector4& vector)
+    {
+        x = vector.x;
+        y = vector.y;
+        z = vector.z;
+    }
 }

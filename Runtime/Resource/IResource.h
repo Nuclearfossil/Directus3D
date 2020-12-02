@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,89 +21,107 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ========================
+//= INCLUDES ======================
 #include <memory>
 #include "../Core/Context.h"
-#include "../Core/GUIDGenerator.h"
-#include "../FileSystem/FileSystem.h"
+#include "../Core/FileSystem.h"
+#include "../Core/Spartan_Object.h"
 #include "../Logging/Log.h"
-//===================================
+//=================================
 
-namespace Directus
+namespace Spartan
 {
-	enum Resource_Type
-	{
-		Resource_Unknown,
-		Resource_Texture,
-		Resource_Audio,
-		Resource_Material,	
-		Resource_Mesh,
-		Resource_Model,
-		Resource_Cubemap,	
-		Resource_Animation,
-		Resource_Font,
-		Resource_Shader, // not an actual resource, just a memory resource, enum is here just so we can get a standard path
-		Resource_Script	 // not an actual resource, just a memory resource, enum is here just so we can get a standard path
-	};
+    enum class ResourceType
+    {
+        Unknown,
+        Texture,
+        Texture2d,
+        TextureCube,
+        Audio,
+        Material,    
+        Mesh,
+        Model,
+        Cubemap,    
+        Animation,
+        Font,
+        Shader
+    };
 
-	enum LoadState
-	{
-		LoadState_Idle,
-		LoadState_Started,
-		LoadState_Completed,
-		LoadState_Failed
-	};
+    enum LoadState
+    {
+        Idle,
+        Started,
+        Completed,
+        Failed
+    };
 
-	class ENGINE_CLASS IResource : public std::enable_shared_from_this<IResource>
-	{
-	public:
-		IResource(Context* context, Resource_Type type);
-		virtual ~IResource() {}
+    class SPARTAN_CLASS IResource : public Spartan_Object
+    {
+    public:
+        IResource(Context* context, ResourceType type);
+        virtual ~IResource() = default;
 
-		//= PROPERTIES ===================================================================================================
-		unsigned int Resource_GetID() { return m_resourceID; }
+        void SetResourceFilePath(const std::string& path)
+        {
+            const bool is_native_file = FileSystem::IsEngineMaterialFile(path) || FileSystem::IsEngineModelFile(path);
 
-		Resource_Type GetResourceType()				{ return m_resourceType; }
-		void SetResourceType(Resource_Type type)	{ m_resourceType = type; }
+            // If this is an native engine file, don't do a file check as no actual foreign material exists (it was created on the fly)
+            if (!is_native_file)
+            {
+                if (!FileSystem::IsFile(path))
+                {
+                    LOG_ERROR("\"%s\" is not a valid file path", path.c_str());
+                    return;
+                }
+            }
 
-		const char* GetResourceType_cstr() { return typeid(*this).name(); }
+            const std::string file_path_relative = FileSystem::GetRelativePath(path);
 
-		const std::string& GetResourceName()			{ return m_resourceName; }
-		void SetResourceName(const std::string& name)	{ m_resourceName = name; }
+            // Foreign file
+            if (!FileSystem::IsEngineFile(path))
+            {
+                m_resource_file_path_foreign    = file_path_relative;
+                m_resource_file_path_native     = FileSystem::NativizeFilePath(file_path_relative);
+            }
+            // Native file
+            else
+            {
+                m_resource_file_path_foreign.clear();
+                m_resource_file_path_native = file_path_relative;
+            }
+            m_resource_name                 = FileSystem::GetFileNameNoExtensionFromFilePath(file_path_relative);
+            m_resource_directory            = FileSystem::GetDirectoryFromFilePath(file_path_relative);
+        }
+        
+        ResourceType GetResourceType()                  const { return m_resource_type; }
+        const char* GetResourceTypeCstr()               const { return typeid(*this).name(); }
+        bool HasFilePathNative()                        const { return !m_resource_file_path_native.empty(); }
+        const std::string& GetResourceFilePath()        const { return m_resource_file_path_foreign; }
+        const std::string& GetResourceFilePathNative()  const { return m_resource_file_path_native; }     
+        const std::string& GetResourceName()            const { return m_resource_name; }
+        const std::string& GetResourceFileName()        const { return m_resource_name; }
+        const std::string& GetResourceDirectory()       const { return m_resource_directory; }
 
-		const std::string& GetResourceFilePath()				{ return m_resourceFilePath; }
-		void SetResourceFilePath(const std::string& filePath)	{ m_resourceFilePath = filePath; }
 
-		bool HasFilePath() { return m_resourceFilePath != NOT_ASSIGNED; }
+        // Misc
+        LoadState GetLoadState() const { return m_load_state; }
 
-		std::string GetResourceFileName()	{ return FileSystem::GetFileNameNoExtensionFromFilePath(m_resourceFilePath); }
-		std::string GetResourceDirectory()	{ return FileSystem::GetDirectoryFromFilePath(m_resourceFilePath); }
-		//================================================================================================================
+        // IO
+        virtual bool SaveToFile(const std::string& file_path)    { return true; }
+        virtual bool LoadFromFile(const std::string& file_path)    { return true; }
 
-		//= IO =================================================================
-		virtual bool SaveToFile(const std::string& filePath)	{ return true; }
-		virtual bool LoadFromFile(const std::string& filePath)	{ return true; }
-		virtual unsigned int GetMemoryUsage()					{ return 0; }
-		//======================================================================
+        // Type
+        template <typename T>
+        static constexpr ResourceType TypeToEnum();
 
-		//= TYPE ================================
-		template <typename T>
-		static Resource_Type DeduceResourceType();
-		//=======================================
+    protected:
+        ResourceType m_resource_type    = ResourceType::Unknown;
+        LoadState m_load_state            = Idle;
 
-		//= PTR ==========================================
-		auto GetSharedPtr() { return shared_from_this(); }
-		//================================================
-
-		LoadState GetLoadState()			{ return m_loadState; }
-		void SetLoadState(LoadState state)	{ m_loadState = state; }
-
-	protected:
-		unsigned int m_resourceID			= NOT_ASSIGNED_HASH;
-		std::string m_resourceName			= NOT_ASSIGNED;
-		std::string m_resourceFilePath		= NOT_ASSIGNED;
-		Resource_Type m_resourceType		= Resource_Unknown;
-		LoadState m_loadState				= LoadState_Idle;
-		Context* m_context					= nullptr;
-	};
+    private:
+        std::string m_resource_name;
+        std::string m_resource_directory;
+        std::string m_resource_file_path_native;
+        std::string m_resource_file_path_foreign;
+    };
 }

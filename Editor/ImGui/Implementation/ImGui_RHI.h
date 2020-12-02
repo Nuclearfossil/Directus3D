@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,390 +22,428 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
 
 //= INCLUDES =========================
+#include <vector>
 #include "ImGui_RHI.h"
 #include "../Source/imgui.h"
-#include <vector>
-#include "Profiling/Profiler.h"
 #include "Rendering/Renderer.h"
-#include "RHI/RHI_Sampler.h"
-#include "RHI/RHI_Texture.h"
 #include "RHI/RHI_Device.h"
-#include "RHI/RHI_VertexBuffer.h"
-#include "RHI/RHI_IndexBuffer.h"
-#include "RHI/RHI_ConstantBuffer.h"
-#include "RHI/RHI_DepthStencilState.h"
-#include "RHI/RHI_RasterizerState.h"
-#include "RHI/RHI_BlendState.h"
 #include "RHI/RHI_Shader.h"
+#include "RHI/RHI_Texture2D.h"
 #include "RHI/RHI_SwapChain.h"
+#include "RHI/RHI_BlendState.h"
+#include "RHI/RHI_CommandList.h"
+#include "RHI/RHI_IndexBuffer.h"
+#include "RHI/RHI_VertexBuffer.h"
+#include "RHI/RHI_PipelineState.h"
+#include "RHI/RHI_RasterizerState.h"
+#include "RHI/RHI_DepthStencilState.h"
 //====================================
 
 namespace ImGui::RHI
 {
-	using namespace Directus;
-	using namespace Directus::Math;
-	using namespace std;
+    using namespace Spartan;
+    using namespace Math;
+    using namespace std;
 
-	// Forward Declarations
-	void InitializePlatformInterface();
+    // Forward Declarations
+    void InitializePlatformInterface();
 
-	// Engine subsystems
-	Context*	g_context		= nullptr;
-	Renderer*	g_renderer		= nullptr;
-	RHI_Pipeline* g_pipeline	= nullptr;
-	Profiler* g_profiler		= nullptr;
+    // Engine subsystems
+    Context*    g_context   = nullptr;
+    Renderer*   g_renderer  = nullptr;
 
-	// RHI Data	
-	shared_ptr<RHI_Device>				g_device;
-	shared_ptr<RHI_Texture>				g_fontTexture;
-	shared_ptr<RHI_Sampler>				g_fontSampler;
-	shared_ptr<RHI_ConstantBuffer>		g_constantBuffer;
-	shared_ptr<RHI_VertexBuffer>		g_vertexBuffer;
-	shared_ptr<RHI_IndexBuffer>			g_indexBuffer;
-	shared_ptr<RHI_BlendState>			g_blendState;
-	shared_ptr<RHI_RasterizerState>		g_rasterizerState;
-	shared_ptr<RHI_DepthStencilState>	g_depthStencilState;
-	shared_ptr<RHI_Shader>				g_shader;
-	struct VertexConstantBuffer { Matrix mvp; };
+    // RHI resources
+    static shared_ptr<RHI_Device>                                           g_rhi_device;
+    static unique_ptr<RHI_Texture>                                          g_texture;
+    static unordered_map<uint32_t, vector<unique_ptr<RHI_VertexBuffer>>>    g_vertex_buffers;
+    static unordered_map<uint32_t, vector<unique_ptr<RHI_IndexBuffer>>>     g_index_buffers;
+    static unique_ptr<RHI_DepthStencilState>                                g_depth_stencil_state;
+    static unique_ptr<RHI_RasterizerState>                                  g_rasterizer_state;
+    static unique_ptr<RHI_BlendState>                                       g_blend_state;
+    static unique_ptr<RHI_Shader>                                           g_shader_vertex;
+    static unique_ptr<RHI_Shader>                                           g_shader_pixel;
 
-	inline bool Initialize(Context* context)
-	{
-		g_context	= context;
-		g_profiler	= context->GetSubsystem<Profiler>().get();
-		g_renderer	= context->GetSubsystem<Renderer>().get();
-		g_pipeline	= g_renderer->GetRHIPipeline().get();
-		g_device	= g_renderer->GetRHIDevice();
-		
-		if (!g_context || !g_device || !g_device->IsInitialized())
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return false;
-		}
+    inline bool Initialize(Context* context, const float width, const float height)
+    {
+        g_context       = context;
+        g_renderer      = context->GetSubsystem<Renderer>();
+        g_rhi_device    = g_renderer->GetRhiDevice();
+        
+        if (!g_context || !g_rhi_device || !g_rhi_device->IsInitialized())
+        {
+            LOG_ERROR_INVALID_PARAMETER();
+            return false;
+        }
 
-		// Font atlas texture
-		g_fontTexture = make_shared<RHI_Texture>(g_context);
+        // Create required RHI objects
+        {
+            g_depth_stencil_state = make_unique<RHI_DepthStencilState>(g_rhi_device, false, g_renderer->GetComparisonFunction());
 
-		// Font atlas sampler
-		g_fontSampler = make_shared<RHI_Sampler>(g_device, Texture_Filter_Bilinear, Texture_Address_Wrap, Comparison_Always);
+            g_rasterizer_state = make_unique<RHI_RasterizerState>
+            (
+                g_rhi_device,
+                RHI_Cull_None,
+                RHI_Fill_Solid,
+                true,    // depth clip
+                true,    // scissor
+                false,   // multi-sample
+                false    // anti-aliased lines
+            );
 
-		// Constant buffer
-		g_constantBuffer = make_shared<RHI_ConstantBuffer>(g_device, (unsigned int)sizeof(VertexConstantBuffer));
+            g_blend_state = make_unique<RHI_BlendState>
+            (
+                g_rhi_device,
+                true,
+                RHI_Blend_Src_Alpha,        // source blend
+                RHI_Blend_Inv_Src_Alpha,    // destination blend
+                RHI_Blend_Operation_Add,    // blend op
+                RHI_Blend_Inv_Src_Alpha,    // source blend alpha
+                RHI_Blend_Zero,             // destination blend alpha
+                RHI_Blend_Operation_Add     // destination op alpha
+            );
 
-		// Vertex buffer
-		g_vertexBuffer = make_shared<RHI_VertexBuffer>(g_device);
+            // Compile shaders
+            const std::string shader_path = g_context->GetSubsystem<ResourceCache>()->GetDataDirectory(Asset_Shaders) + "/ImGui.hlsl";
+            g_shader_vertex = make_unique<RHI_Shader>(g_context);
+            g_shader_vertex->Compile<RHI_Vertex_Pos2dTexCol8>(RHI_Shader_Vertex, shader_path);
+            g_shader_pixel = make_unique<RHI_Shader>(g_context);
+            g_shader_pixel->Compile(RHI_Shader_Pixel, shader_path);
+        }
 
-		// Index buffer
-		g_indexBuffer = make_shared<RHI_IndexBuffer>(g_device, sizeof(ImDrawIdx) == 2 ? Format_R16_UINT : Format_R32_UINT);
+        // Font atlas
+        {
+            unsigned char* pixels;
+            int atlas_width, atlas_height, bpp;
+            auto& io = GetIO();
+            io.Fonts->GetTexDataAsRGBA32(&pixels, &atlas_width, &atlas_height, &bpp);
 
-		// Create depth-stencil State
-		g_depthStencilState = make_shared<RHI_DepthStencilState>(g_device, false);
+            // Copy pixel data
+            const unsigned int size = atlas_width * atlas_height * bpp;
+            vector<std::byte> data(size);
+            data.reserve(size);
+            memcpy(&data[0], reinterpret_cast<std::byte*>(pixels), size);
 
-		// Rasterizer state
-		g_rasterizerState = make_shared<RHI_RasterizerState>
-		(
-			g_device,
-			Cull_None,
-			Fill_Solid,
-			true,	// depth clip
-			true,	// scissor
-			false,	// multi-sample
-			false	// anti-aliased lines
-		);
+            // Upload texture to graphics system
+            g_texture = make_unique<RHI_Texture2D>(g_context, atlas_width, atlas_height, RHI_Format_R8G8B8A8_Unorm, data);
+            io.Fonts->TexID = static_cast<ImTextureID>(g_texture.get());
+        }
 
-		// Blend state
-		g_blendState = make_shared<RHI_BlendState>
-		(
-			g_device,
-			true,
-			Blend_Src_Alpha,		// source blend
-			Blend_Inv_Src_Alpha,	// destination blend
-			Blend_Operation_Add,	// blend op
-			Blend_Inv_Src_Alpha,	// source blend alpha
-			Blend_Zero,				// destination blend alpha
-			Blend_Operation_Add		// destination op alpha
-		);
+        // Setup back-end capabilities flags
+        auto& io = GetIO();
+        io.BackendFlags         |= ImGuiBackendFlags_RendererHasViewports;
+        io.BackendFlags         |= ImGuiBackendFlags_RendererHasVtxOffset;
+        io.BackendRendererName  = "RHI";
+        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+        {
+            InitializePlatformInterface();
+        }
 
-		// Shader
-		static string shader =
-		"SamplerState sampler0;"
-		"Texture2D texture0;"
-		"cbuffer vertexBuffer : register(b0)"
-		"{"
-		"	matrix transform;"
-		"};"
-		"struct VS_INPUT"
-		"{"
-		"	float2 pos	: POSITION0;"
-		"	float2 uv	: TEXCOORD0;"
-		"	float4 col	: COLOR0;"
-		"};"														
-		"struct PS_INPUT"
-		"{"
-		"	float4 pos : SV_POSITION;"
-		"	float4 col : COLOR;"
-		"	float2 uv  : TEXCOORD;"
-		"};"
-		"PS_INPUT mainVS(VS_INPUT input)"
-		"{"
-		"	PS_INPUT output;"
-		"	output.pos = mul(transform, float4(input.pos.xy, 0.f, 1.f));"
-		"	output.col = input.col;	"
-		"	output.uv  = input.uv;"
-		"	return output;"
-		"}"
-		"float4 mainPS(PS_INPUT input) : SV_Target"
-		"{"
-		"	return input.col * texture0.Sample(sampler0, input.uv);"
-		"}";
-		g_shader = make_shared<RHI_Shader>(g_device);
-		g_shader->CompileVertexPixel(shader, Input_Position2DTextureColor8);
+        return true;
+    }
 
-		// Setup back-end capabilities flags
-		ImGuiIO& io = ImGui::GetIO();	
-		io.BackendFlags			|= ImGuiBackendFlags_RendererHasViewports;
-		io.BackendRendererName	= "RHI";
-		if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
-		{
-			InitializePlatformInterface();
-		}
+    inline void Shutdown()
+    {
+        DestroyPlatformWindows();
+    }
 
-		// Font atlas
-		{
-			unsigned char* pixels;
-			int width, height, bpp;
-			io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height, &bpp);
+    inline void Render(ImDrawData* draw_data, RHI_SwapChain* swap_chain_other = nullptr, const bool clear = true)
+    {
+        if (!draw_data)
+        {
+            LOG_ERROR("Invalid draw data");
+            return;
+        }
 
-			// Copy pixel data
-			unsigned int size = width * height * bpp;
-			vector<std::byte> data(size);
-			data.reserve(size);
-			memcpy(&data[0], (std::byte*)pixels, size);
+        // Avoid rendering when minimized, scale coordinates for retina displays (screen coordinates != framebuffer coordinates)
+        const int fb_width  = static_cast<int>(draw_data->DisplaySize.x * draw_data->FramebufferScale.x);
+        const int fb_height = static_cast<int>(draw_data->DisplaySize.y * draw_data->FramebufferScale.y);
+        if (fb_width <= 0 || fb_height <= 0 || draw_data->TotalVtxCount == 0)
+            return;
 
-			// Upload texture to graphics system
-			if (g_fontTexture->ShaderResource_Create2D(width, height, 4, Format_R8G8B8A8_UNORM, data, false))
-			{
-				io.Fonts->TexID = (ImTextureID)g_fontTexture->GetShaderResource();
-			}
-		}
+        // Get the swap chain we will be working with
+        bool is_child_window        = swap_chain_other != nullptr;
+        RHI_SwapChain* swap_chain   = is_child_window ? swap_chain_other : g_renderer->GetSwapChain();
+        RHI_CommandList* cmd_list   = swap_chain->GetCmdList();
 
-		return true;
-	}
+        // Validate command list
+        if (!cmd_list)
+        {
+            LOG_ERROR("Invalid command list");
+            return;
+        }
 
-	inline void Shutdown()
-	{
-		ImGui::DestroyPlatformWindows();
-	}
+        // Validate command list state
+        if (!cmd_list->IsRecording())
+        {
+            LOG_ERROR("Command list is not recording, can't render anything");
+            return;
+        }
 
-	inline void RenderDrawData(ImDrawData* draw_data, bool isOtherWindow = false)
-	{
-		TIME_BLOCK_START_MULTI(g_profiler);
-		g_device->EventBegin("Pass_ImGui");
+        // Validate swap chain state
 
-		// Grow vertex buffer as needed
-		if (g_vertexBuffer->GetVertexCount() < (unsigned int)draw_data->TotalVtxCount)
-		{
-			unsigned int newSize = draw_data->TotalVtxCount + 5000;
-			if (!g_vertexBuffer->CreateDynamic(sizeof(ImDrawVert), newSize))
-				return;
-		}
+        // Update vertex and index buffers
+        RHI_VertexBuffer* vertex_buffer = nullptr;
+        RHI_IndexBuffer* index_buffer   = nullptr;
+        {
+            const uint32_t swapchain_id         = swap_chain->GetId();
+            const uint32_t swapchain_cmd_index  = swap_chain->GetCmdIndex();
 
-		// Grow index buffer as needed
-		if (g_indexBuffer->GetIndexCount() < (unsigned int)draw_data->TotalIdxCount)
-		{
-			unsigned int newSize = draw_data->TotalIdxCount + 10000;
-			if (!g_indexBuffer->CreateDynamic(sizeof(ImDrawIdx), newSize))
-				return;
-		}
+            const uint32_t gap =  Math::Helper::Clamp<uint32_t>((swapchain_cmd_index + 1) - static_cast<uint32_t>(g_vertex_buffers[swapchain_id].size()), 0, 10);
+            for (uint32_t i = 0; i < gap; i++)
+            {
+                g_vertex_buffers[swapchain_id].emplace_back(make_unique<RHI_VertexBuffer>(g_rhi_device, static_cast<uint32_t>(sizeof(ImDrawVert))));
+                g_index_buffers[swapchain_id].emplace_back(make_unique<RHI_IndexBuffer>(g_rhi_device));
+            }
 
-		// Copy and convert all vertices into a single contiguous buffer
-		auto vtx_dst	= (ImDrawVert*)g_vertexBuffer->Map();
-		auto* idx_dst	= (ImDrawIdx*)g_indexBuffer->Map();
-		for (int i = 0; i < draw_data->CmdListsCount; i++)
-		{
-			const ImDrawList* cmd_list = draw_data->CmdLists[i];
-			memcpy(vtx_dst, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
-			memcpy(idx_dst, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof(ImDrawIdx));
-			vtx_dst += cmd_list->VtxBuffer.Size;
-			idx_dst += cmd_list->IdxBuffer.Size;
-		}
-		g_vertexBuffer->Unmap();
-		g_indexBuffer->Unmap();
+            vertex_buffer   = g_vertex_buffers[swapchain_id][swapchain_cmd_index].get();
+            index_buffer    = g_index_buffers[swapchain_id][swapchain_cmd_index].get();
 
-		// Setup orthographic projection matrix into our constant buffer
-		// Our visible ImGui space lies from draw_data->DisplayPos (top left) to 
-		// draw_data->DisplayPos+data_data->DisplaySize (bottom right). DisplayMin is (0,0) for single viewport apps.
-		{
-			float L = draw_data->DisplayPos.x;
-			float R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
-			float T = draw_data->DisplayPos.y;
-			float B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
-			Matrix mvp = Matrix
-			(
-				2.0f / (R - L),	0.0f,			0.0f,	(R + L) / (L - R),
-				0.0f,			2.0f / (T - B), 0.0f,	(T + B) / (B - T),
-				0.0f,			0.0f,			0.5f,	0.5f,
-				0.0f,			0.0f,			0.0f,	1.0f
-			);
+            // Grow vertex buffer as needed
+            if (vertex_buffer->GetVertexCount() < static_cast<unsigned int>(draw_data->TotalVtxCount))
+            {
+                const unsigned int new_size = draw_data->TotalVtxCount + 5000;
+                if (!vertex_buffer->CreateDynamic<ImDrawVert>(new_size))
+                    return;
+            }
+            
+            // Grow index buffer as needed
+            if (index_buffer->GetIndexCount() < static_cast<unsigned int>(draw_data->TotalIdxCount))
+            {
+                const unsigned int new_size = draw_data->TotalIdxCount + 10000;
+                if (!index_buffer->CreateDynamic<ImDrawIdx>(new_size))
+                    return;
+            }
+            
+            // Copy and convert all vertices into a single contiguous buffer
+            auto vtx_dst = static_cast<ImDrawVert*>(vertex_buffer->Map());
+            auto idx_dst = static_cast<ImDrawIdx*>(index_buffer->Map());
+            if (vtx_dst && idx_dst)
+            {
+                for (auto i = 0; i < draw_data->CmdListsCount; i++)
+                {
+                    const ImDrawList* cmd_list = draw_data->CmdLists[i];
+                    memcpy(vtx_dst, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof(ImDrawVert));
+                    memcpy(idx_dst, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof(ImDrawIdx));
+                    vtx_dst += cmd_list->VtxBuffer.Size;
+                    idx_dst += cmd_list->IdxBuffer.Size;
+                }
+            
+                vertex_buffer->Unmap();
+                index_buffer->Unmap();
+            }
+        }
 
-			auto buffer = (VertexConstantBuffer*)g_constantBuffer->Map();
-			buffer->mvp = mvp;
-			g_constantBuffer->Unmap();
-		}
+        // Set render state
+        static RHI_PipelineState pipeline_state = {};
+        pipeline_state.shader_vertex            = g_shader_vertex.get();
+        pipeline_state.shader_pixel             = g_shader_pixel.get();
+        pipeline_state.rasterizer_state         = g_rasterizer_state.get();
+        pipeline_state.blend_state              = g_blend_state.get();
+        pipeline_state.depth_stencil_state      = g_depth_stencil_state.get();
+        pipeline_state.vertex_buffer_stride     = vertex_buffer->GetStride();
+        pipeline_state.render_target_swapchain  = swap_chain;
+        pipeline_state.clear_color[0]           = clear ? Vector4(0.0f, 0.0f, 0.0f, 1.0f) : rhi_color_load;
+        pipeline_state.viewport.width           = draw_data->DisplaySize.x;
+        pipeline_state.viewport.height          = draw_data->DisplaySize.y;
+        pipeline_state.dynamic_scissor          = true;
+        pipeline_state.primitive_topology       = RHI_PrimitiveTopology_TriangleList;
+        pipeline_state.pass_name                = is_child_window ? "pass_imgui_window_child" : "pass_imgui_window_main";
 
-		// Setup render state
-		if (!isOtherWindow)
-		{
-			g_pipeline->Clear();
-			g_renderer->SwapChain_SetAsRenderTarget();
-			g_renderer->SwapChain_Clear(Vector4(0, 0, 0, 1));
-		}	
-		auto viewport = RHI_Viewport(0.0f, 0.0f, draw_data->DisplaySize.x, draw_data->DisplaySize.y);
-		g_pipeline->SetViewport(viewport);
-		g_pipeline->SetPrimitiveTopology(PrimitiveTopology_TriangleList);
-		g_pipeline->SetBlendState(g_blendState);
-		g_pipeline->SetDepthStencilState(g_depthStencilState);
-		g_pipeline->SetRasterizerState(g_rasterizerState);	
-		g_pipeline->SetVertexShader(g_shader);
-		g_pipeline->SetPixelShader(g_shader);
-		g_pipeline->SetVertexBuffer(g_vertexBuffer);
-		g_pipeline->SetIndexBuffer(g_indexBuffer);
-		g_pipeline->SetConstantBuffer(g_constantBuffer, 0, Buffer_VertexShader);
-		g_pipeline->SetSampler(g_fontSampler);
+        // Record commands
+        if (cmd_list->BeginRenderPass(pipeline_state))
+        {
+            // Setup orthographic projection matrix into our constant buffer
+            // Our visible ImGui space lies from draw_data->DisplayPos (top left) to 
+            // draw_data->DisplayPos+data_data->DisplaySize (bottom right). DisplayMin is (0,0) for single viewport apps.
+            {
+                const auto L = draw_data->DisplayPos.x;
+                const auto R = draw_data->DisplayPos.x + draw_data->DisplaySize.x;
+                const auto T = draw_data->DisplayPos.y;
+                const auto B = draw_data->DisplayPos.y + draw_data->DisplaySize.y;
+                const auto wvp = Matrix
+                (
+                    2.0f / (R - L), 0.0f, 0.0f, (R + L) / (L - R),
+                    0.0f, 2.0f / (T - B), 0.0f, (T + B) / (B - T),
+                    0.0f, 0.0f, 0.5f, 0.5f,
+                    0.0f, 0.0f, 0.0f, 1.0f
+                );
 
-		// Render command lists
-		int vtx_offset = 0;
-		int idx_offset = 0;
-		ImVec2 pos = draw_data->DisplayPos;
-		for (int i = 0; i < draw_data->CmdListsCount; i++)
-		{
-			const ImDrawList* cmd_list = draw_data->CmdLists[i];
-			for (int cmd_i = 0; cmd_i < cmd_list->CmdBuffer.Size; cmd_i++)
-			{
-				const ImDrawCmd* pcmd = &cmd_list->CmdBuffer[cmd_i];
-				if (pcmd->UserCallback)
-				{
-					// User callback (registered via ImDrawList::AddCallback)
-					pcmd->UserCallback(cmd_list, pcmd);
-				}
-				else
-				{
-					// Apply scissor rectangle
-					Rectangle scissorRect	 = Rectangle(pcmd->ClipRect.x - pos.x, pcmd->ClipRect.y - pos.y, pcmd->ClipRect.z - pos.x, pcmd->ClipRect.w - pos.y);
-					scissorRect.width		-= scissorRect.x;
-					scissorRect.height		-= scissorRect.y;
-					g_pipeline->SetScissorRectangle(scissorRect);
+                g_renderer->SetGlobalShaderObjectTransform(cmd_list, wvp);
+            }
 
-					// Bind texture, Draw
-					auto texture_srv = (void*)pcmd->TextureId;
-					g_pipeline->SetTexture(texture_srv);
-					g_pipeline->DrawIndexed(pcmd->ElemCount, idx_offset, vtx_offset);
-					g_pipeline->Bind();
-				}
-				idx_offset += pcmd->ElemCount;
-			}
-			vtx_offset += cmd_list->VtxBuffer.Size;
-		}
+            // Transition layouts
+            for (auto i = 0; i < draw_data->CmdListsCount; i++)
+            {
+                auto cmd_list_imgui = draw_data->CmdLists[i];
+                for (int cmd_i = 0; cmd_i < cmd_list_imgui->CmdBuffer.Size; cmd_i++)
+                {
+                    const auto pcmd = &cmd_list_imgui->CmdBuffer[cmd_i];
+                    if (RHI_Texture* texture = static_cast<RHI_Texture*>(pcmd->TextureId))
+                    {
+                        texture->SetLayout(RHI_Image_Layout::Shader_Read_Only_Optimal, cmd_list);
+                    }
+                }
+            }
 
-		if (!isOtherWindow)
-		{
-			g_renderer->SwapChain_Present();
-		}
+            cmd_list->SetBufferVertex(vertex_buffer);
+            cmd_list->SetBufferIndex(index_buffer);
 
-		g_device->EventEnd();
-		TIME_BLOCK_END_MULTI(g_profiler);
-	}
+            // Render command lists
+            int global_vtx_offset   = 0;
+            int global_idx_offset   = 0;
+            const auto& clip_off    = draw_data->DisplayPos;
+            Math::Rectangle scissor_rect;
+            for (auto i = 0; i < draw_data->CmdListsCount; i++)
+            {
+                auto cmd_list_imgui = draw_data->CmdLists[i];
+                for (auto cmd_i = 0; cmd_i < cmd_list_imgui->CmdBuffer.Size; cmd_i++)
+                {
+                    const auto pcmd = &cmd_list_imgui->CmdBuffer[cmd_i];
+                    if (pcmd->UserCallback != nullptr)
+                    {
+                        pcmd->UserCallback(cmd_list_imgui, pcmd);
+                    }
+                    else
+                    {
+                        // Compute scissor rectangle
+                        scissor_rect.left      = pcmd->ClipRect.x - clip_off.x;
+                        scissor_rect.top       = pcmd->ClipRect.y - clip_off.y;
+                        scissor_rect.right     = pcmd->ClipRect.z - clip_off.x;
+                        scissor_rect.bottom    = pcmd->ClipRect.w - clip_off.y;
 
-	inline void OnResize(unsigned int width, unsigned int height)
-	{
-		if (!g_renderer)
-			return;
+                        // Apply scissor rectangle, bind texture and draw
+                        cmd_list->SetScissorRectangle(scissor_rect);
+                        cmd_list->SetTexture(RendererBindingsSrv::tex, static_cast<RHI_Texture*>(pcmd->TextureId));
+                        cmd_list->DrawIndexed(pcmd->ElemCount, pcmd->IdxOffset + global_idx_offset, pcmd->VtxOffset + global_vtx_offset);
+                    }
 
-		g_renderer->SwapChain_Resize(width, height);
-	}
+                }
+                global_idx_offset += cmd_list_imgui->IdxBuffer.Size;
+                global_vtx_offset += cmd_list_imgui->VtxBuffer.Size;
+            }
 
-	//--------------------------------------------
-	// MULTI-VIEWPORT / PLATFORM INTERFACE SUPPORT
-	//--------------------------------------------
-	struct RHI_Window
-	{
-		std::shared_ptr<RHI_SwapChain> swapChain;
-	};
+            cmd_list->EndRenderPass();
+        }
+    }
 
-	inline void _CreateWindow(ImGuiViewport* viewport)
-	{
-		RHI_Window* data = IM_NEW(RHI_Window)();
-		viewport->RendererUserData = data;
+    //--------------------------------------------
+    // MULTI-VIEWPORT / PLATFORM INTERFACE SUPPORT
+    //--------------------------------------------
 
-		data->swapChain = make_shared<RHI_SwapChain>
-		(
-			viewport->PlatformHandle,
-			g_device,
-			(unsigned int)viewport->Size.x,
-			(unsigned int)viewport->Size.y,
-			Format_R8G8B8A8_UNORM,
-			Swap_Discard,
-			0
-		);
-	}
+    inline RHI_SwapChain* GetSwapchain(ImGuiViewport* viewport)
+    {
+        RHI_SwapChain* swapchain = nullptr;
 
-	inline void _DestroyWindow(ImGuiViewport* viewport)
-	{
-		auto window = (RHI_Window*)viewport->RendererUserData;
-		if (window) { IM_DELETE(window); }
-		viewport->RendererUserData = nullptr;
-	}
+        if (!viewport)
+        {
+            LOG_ERROR("Invalid viewport");
+            return swapchain;
+        }
 
-	inline void _SetWindowSize(ImGuiViewport* viewport, ImVec2 size)
-	{
-		auto window = (RHI_Window*)viewport->RendererUserData;
-		if (!window || !window->swapChain)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return;
-		}
-		
-		if (!window->swapChain->Resize((unsigned int)size.x, (unsigned int)size.y))
-		{
-			LOG_ERROR("Failed to resize swap chain");
-			return;
-		}
-	}
+        swapchain = static_cast<RHI_SwapChain*>(viewport->RendererUserData);
 
-	inline void _RenderWindow(ImGuiViewport* viewport, void*)
-	{
-		auto window = (RHI_Window*)viewport->RendererUserData;
-		if (!window || !window->swapChain)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return;
-		}
+        if (!swapchain)
+        {
+            LOG_ERROR("Invalid swapchain");
+            return swapchain;
+        }
 
-		bool clear = !(viewport->Flags & ImGuiViewportFlags_NoRendererClear);
-		window->swapChain->SetAsRenderTarget();
-		if (clear) window->swapChain->Clear(Vector4(0, 0, 0, 1));
+        return swapchain;
+    }
 
-		RenderDrawData(viewport->DrawData, true);
-	}
+    static void RHI_Window_Create(ImGuiViewport* viewport)
+    {
+        if (!viewport)
+        {
+            LOG_ERROR("Invalid viewport");
+            return;
+        }
 
-	inline void _SwapBuffers(ImGuiViewport* viewport, void*)
-	{
-		auto window = (RHI_Window*)viewport->RendererUserData;
-		if (!window || !window->swapChain)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return;
-		}
+        viewport->RendererUserData = new RHI_SwapChain
+        (
+            viewport->PlatformHandle,
+            g_rhi_device,
+            static_cast<uint32_t>(viewport->Size.x),
+            static_cast<uint32_t>(viewport->Size.y),
+            RHI_Format_R8G8B8A8_Unorm,
+            g_renderer->GetSwapChain()->GetBufferCount(),
+            g_renderer->GetSwapChain()->GetFlags(),
+            (string("swapchain_child_") + string(to_string(viewport->ID))).c_str()
+        );
+    }
 
-		window->swapChain->Present(Present_Off);
-	}
+    static void RHI_Window_Destroy(ImGuiViewport* viewport)
+    {
+        RHI_SwapChain* swap_chain = GetSwapchain(viewport);
+        if (!swap_chain)
+            return;
 
-	inline void InitializePlatformInterface()
-	{
-		ImGuiPlatformIO& platform_io		= ImGui::GetPlatformIO();
-		platform_io.Renderer_CreateWindow	= _CreateWindow;
-		platform_io.Renderer_DestroyWindow	= _DestroyWindow;
-		platform_io.Renderer_SetWindowSize	= _SetWindowSize;
-		platform_io.Renderer_RenderWindow	= _RenderWindow;
-		platform_io.Renderer_SwapBuffers	= _SwapBuffers;
-	}
+        sp_ptr_delete(swap_chain);
+        viewport->RendererUserData = nullptr;
+    }
+
+    static void RHI_Window_SetSize(ImGuiViewport* viewport, const ImVec2 size)
+    {
+        RHI_SwapChain* swap_chain = GetSwapchain(viewport);
+        if (!swap_chain)
+            return;
+        
+        if (!swap_chain->Resize(static_cast<uint32_t>(size.x), static_cast<uint32_t>(size.y)))
+        {
+            LOG_ERROR("Failed to resize swap chain");
+        }
+    }
+
+    static void RHI_Window_Render(ImGuiViewport* viewport, void*)
+    {
+        RHI_SwapChain* swap_chain = GetSwapchain(viewport);
+        if (!swap_chain)
+            return;
+
+        RHI_CommandList* cmd_list = swap_chain->GetCmdList();
+        if (!cmd_list)
+            return;
+
+        if (!cmd_list->Begin())
+        {
+            LOG_ERROR("Failed to begin command list");
+            return;
+        }
+
+        const bool clear = !(viewport->Flags & ImGuiViewportFlags_NoRendererClear);
+        Render(viewport->DrawData, swap_chain, clear);
+
+        if (!cmd_list->End())
+        {
+            LOG_ERROR("Failed to end command list");
+            return;
+        }
+
+        if (!cmd_list->Submit())
+        {
+            LOG_ERROR("Failed to submit command list");
+        }
+    }
+
+    static void RHI_Window_Present(ImGuiViewport* viewport, void*)
+    {
+        RHI_SwapChain* swap_chain = GetSwapchain(viewport);
+        if (!swap_chain)
+            return;
+
+        if (!swap_chain->Present())
+        {
+            LOG_ERROR("Failed to present");
+        }
+    }
+
+    inline void InitializePlatformInterface()
+    {
+        ImGuiPlatformIO& platform_io        = ImGui::GetPlatformIO();
+        platform_io.Renderer_CreateWindow   = RHI_Window_Create;
+        platform_io.Renderer_DestroyWindow  = RHI_Window_Destroy;
+        platform_io.Renderer_SetWindowSize  = RHI_Window_SetSize;
+        platform_io.Renderer_RenderWindow   = RHI_Window_Render;
+        platform_io.Renderer_SwapBuffers    = RHI_Window_Present;
+    }
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,141 +19,91 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ========================
+//= INCLUDES =====================
+#include "Spartan.h"
 #include "../RHI_Implementation.h"
 #include "../RHI_Device.h"
 #include "../RHI_IndexBuffer.h"
-#include "../../Logging/Log.h"
-//===================================
+//================================
 
 //= NAMESPACES =====
 using namespace std;
 //==================
 
-namespace Directus
+namespace Spartan
 {
-	RHI_IndexBuffer::RHI_IndexBuffer(std::shared_ptr<RHI_Device> rhiDevice, RHI_Format format)
-	{
-		m_rhiDevice		= rhiDevice;
-		m_buffer		= nullptr;
-		m_bufferFormat	= format;
-		m_memoryUsage	= 0;
-		m_indexCount	= 0;
-	}
+    void RHI_IndexBuffer::_destroy()
+    {
+        d3d11_utility::release(*reinterpret_cast<ID3D11Buffer**>(&m_buffer));
+        return;
+    }
 
-	RHI_IndexBuffer::~RHI_IndexBuffer()
-	{
-		SafeRelease((ID3D11Buffer*)m_buffer);
-	}
+    bool RHI_IndexBuffer::_create(const void* indices)
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device)
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return false;
+        }
 
-	bool RHI_IndexBuffer::Create(const vector<unsigned int>& indices)
-	{
-		SafeRelease((ID3D11Buffer*)m_buffer);
+        const bool is_dynamic = indices == nullptr;
 
-		if (!m_rhiDevice || !m_rhiDevice->GetDevice<ID3D11Device>())
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return false;
-		}
+        // Destroy previous buffer
+        _destroy();
 
-		if (indices.empty())
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return false;
-		}
+        D3D11_BUFFER_DESC buffer_desc;
+        ZeroMemory(&buffer_desc, sizeof(buffer_desc));
+        buffer_desc.ByteWidth            = m_stride * m_index_count;
+        buffer_desc.Usage                = is_dynamic ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_IMMUTABLE;
+        buffer_desc.CPUAccessFlags        = is_dynamic ? D3D11_CPU_ACCESS_WRITE : 0;
+        buffer_desc.BindFlags            = D3D11_BIND_INDEX_BUFFER;    
+        buffer_desc.MiscFlags            = 0;
+        buffer_desc.StructureByteStride = 0;
 
-		m_indexCount			= (unsigned int)indices.size();
-		unsigned int byteWidth	= sizeof(unsigned int) * m_indexCount;
+        D3D11_SUBRESOURCE_DATA init_data;
+        init_data.pSysMem            = indices;
+        init_data.SysMemPitch        = 0;
+        init_data.SysMemSlicePitch    = 0;
 
-		D3D11_BUFFER_DESC bufferDesc;
-		ZeroMemory(&bufferDesc, sizeof(bufferDesc));
-		bufferDesc.ByteWidth			= byteWidth;
-		bufferDesc.Usage				= D3D11_USAGE_IMMUTABLE;
-		bufferDesc.BindFlags			= D3D11_BIND_INDEX_BUFFER;
-		bufferDesc.CPUAccessFlags		= 0;
-		bufferDesc.MiscFlags			= 0;
-		bufferDesc.StructureByteStride	= 0;
+        const auto ptr = reinterpret_cast<ID3D11Buffer**>(&m_buffer);
+        const auto result = m_rhi_device->GetContextRhi()->device->CreateBuffer(&buffer_desc, is_dynamic ? nullptr : &init_data, ptr);
+        if FAILED(result)
+        {
+            LOG_ERROR(" Failed to create index buffer");
+            return false;
+        }
 
-		D3D11_SUBRESOURCE_DATA initData;
-		initData.pSysMem			= indices.data();
-		initData.SysMemPitch		= 0;
-		initData.SysMemSlicePitch	= 0;
+        return true;
+    }
 
-		auto ptr = (ID3D11Buffer**)&m_buffer;
-		auto result = m_rhiDevice->GetDevice<ID3D11Device>()->CreateBuffer(&bufferDesc, &initData, ptr);
-		if FAILED(result)
-		{
-			LOG_ERROR(" Failed to create index buffer");
-			return false;
-		}
+    void* RHI_IndexBuffer::Map()
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device_context || !m_buffer)
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return nullptr;
+        }
 
-		// Compute memory usage
-		m_memoryUsage = unsigned int((sizeof(unsigned int) * indices.size()));
+        D3D11_MAPPED_SUBRESOURCE mapped_resource;
+        const auto result = m_rhi_device->GetContextRhi()->device_context->Map(static_cast<ID3D11Resource*>(m_buffer), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped_resource);
+        if (FAILED(result))
+        {
+            LOG_ERROR("Failed to map index buffer.");
+            return nullptr;
+        }
 
-		return true;
-	}
+        return mapped_resource.pData;
+    }
 
-	bool RHI_IndexBuffer::CreateDynamic(unsigned int stride, unsigned int indexCount)
-	{
-		SafeRelease((ID3D11Buffer*)m_buffer);
+    bool RHI_IndexBuffer::Unmap()
+    {
+        if (!m_rhi_device || !m_rhi_device->GetContextRhi()->device_context || !m_buffer)
+        {
+            LOG_ERROR_INVALID_INTERNALS();
+            return false;
+        }
 
-		if (!m_rhiDevice || !m_rhiDevice->GetDevice<ID3D11Device>())
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return false;
-		}
-
-		m_indexCount = indexCount;
-
-		D3D11_BUFFER_DESC bufferDesc;
-		ZeroMemory(&bufferDesc, sizeof(bufferDesc));
-		bufferDesc.ByteWidth			= indexCount * stride;
-		bufferDesc.Usage				= D3D11_USAGE_DYNAMIC;
-		bufferDesc.BindFlags			= D3D11_BIND_INDEX_BUFFER;
-		bufferDesc.CPUAccessFlags		= D3D11_CPU_ACCESS_WRITE;
-		bufferDesc.MiscFlags			= 0;
-		bufferDesc.StructureByteStride	= 0;
-
-		auto ptr = (ID3D11Buffer**)&m_buffer;
-		auto result = m_rhiDevice->GetDevice<ID3D11Device>()->CreateBuffer(&bufferDesc, nullptr, ptr);
-		if FAILED(result)
-		{
-			LOG_ERROR("Failed to create dynamic index buffer");
-			return false;
-		}
-
-		return true;
-	}
-
-	void* RHI_IndexBuffer::Map()
-	{
-		if (!m_rhiDevice || !m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>() || !m_buffer)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return nullptr;
-		}
-
-		D3D11_MAPPED_SUBRESOURCE mappedResource;
-		auto result = m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>()->Map((ID3D11Resource*)m_buffer, 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
-		if (FAILED(result))
-		{
-			LOG_ERROR("Failed to map index buffer.");
-			return nullptr;
-		}
-
-		return mappedResource.pData;
-	}
-
-	bool RHI_IndexBuffer::Unmap()
-	{
-		if (!m_rhiDevice || !m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>() || !m_buffer)
-		{
-			LOG_ERROR_INVALID_INTERNALS();
-			return false;
-		}
-
-		m_rhiDevice->GetDeviceContext<ID3D11DeviceContext>()->Unmap((ID3D11Resource*)m_buffer, 0);
-
-		return true;
-	}
+        m_rhi_device->GetContextRhi()->device_context->Unmap(static_cast<ID3D11Resource*>(m_buffer), 0);
+        return true;
+    }
 }

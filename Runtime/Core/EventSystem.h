@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #pragma once
 
 //= INCLUDES ===============
-#include <map>
+#include <unordered_map>
 #include <vector>
 #include <functional>
 #include "../Core/Variant.h"
@@ -31,91 +31,99 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 /*
 HOW TO USE
 =================================================================================
-To subscribe a function to an event		-> SUBSCRIBE_TO_EVENT(EVENT_ID, Handler);
-To unsubscribe a function from an event	-> SUBSCRIBE_TO_EVENT(EVENT_ID, Handler);
-To fire an event						-> FIRE_EVENT(EVENT_ID);
-To fire an event with data				-> FIRE_EVENT_DATA(EVENT_ID, Variant);
+To subscribe a function to an event        -> SUBSCRIBE_TO_EVENT(EVENT_ID, Handler);
+To unsubscribe a function from an event    -> SUBSCRIBE_TO_EVENT(EVENT_ID, Handler);
+To fire an event                        -> FIRE_EVENT(EVENT_ID);
+To fire an event with data                -> FIRE_EVENT_DATA(EVENT_ID, Variant);
 
 Note: Currently, this is a blocking event system
 =================================================================================
 */
 
-enum Event_Type
+enum class EventType
 {
-	Event_Frame_Start,			// A frame begins
-	Event_Frame_End,			// A frame ends
-	Event_World_Saved,			// The world finished saving to file
-	Event_World_Loaded,			// The world finished loading from file
-	Event_World_Unload,			// The world should clear everything
-	Event_World_Resolve,		// The world should resolve
-	Event_World_Submit,			// The world is submitting entities to the renderer
-	Event_World_Stop,			// The world should stop ticking
-	Event_World_Start,			// The world should start ticking
-	Event_World_EntitySelected	// An entity was clicked in the viewport
+    FrameEnd,                // A frame ends
+    WindowData,             // The window has a message for processing
+    WorldSave,                // The world must be saved to file
+    WorldSaved,                // The world finished saving to file
+    WorldLoad,                // The world must be loaded from file
+    WorldLoaded,            // The world finished loading from file
+    WorldUnload,            // The world should clear everything
+    WorldResolve,            // The world should resolve
+    WorldResolved,            // The world has finished resolving
+    WorldStop,                // The world should stop ticking
+    WorldStart,                // The world should start ticking
+    FrameResolutionChanged
 };
 
-//= MACROS =====================================================================================================
-#define EVENT_HANDLER_STATIC(function)				[](Directus::Variant var)		{ function(); }
-#define EVENT_HANDLER(function)						[this](Directus::Variant var)	{ function(); }
-#define EVENT_HANDLER_VARIANT(function)				[this](Directus::Variant var)	{ function(var); }
-#define EVENT_HANDLER_VARIANT_STATIC(function)		[](Directus::Variant var)		{ function(var); }
-#define SUBSCRIBE_TO_EVENT(eventID, function)		Directus::EventSystem::Get().Subscribe(eventID, function);
-#define UNSUBSCRIBE_FROM_EVENT(eventID, function)	Directus::EventSystem::Get().Unsubscribe(eventID, function);
-#define FIRE_EVENT(eventID)							Directus::EventSystem::Get().Fire(eventID)
-#define FIRE_EVENT_DATA(eventID, data)				Directus::EventSystem::Get().Fire(eventID, data)
-//==============================================================================================================
+//= MACROS ====================================================================================================
+#define EVENT_HANDLER_EXPRESSION(expression)        [this](const Spartan::Variant& var)    { ##expression }
+#define EVENT_HANDLER_EXPRESSION_STATIC(expression)    [](const Spartan::Variant& var)        { ##expression }
 
-namespace Directus
+#define EVENT_HANDLER(function)                        [this](const Spartan::Variant& var)    { function(); }
+#define EVENT_HANDLER_STATIC(function)                [](const Spartan::Variant& var)        { function(); }
+
+#define EVENT_HANDLER_VARIANT(function)                [this](const Spartan::Variant& var)    { function(var); }
+#define EVENT_HANDLER_VARIANT_STATIC(function)        [](const Spartan::Variant& var)        { function(var); }
+
+#define FIRE_EVENT(eventID)                            Spartan::EventSystem::Get().Fire(eventID)
+#define FIRE_EVENT_DATA(eventID, data)                Spartan::EventSystem::Get().Fire(eventID, data)
+
+#define SUBSCRIBE_TO_EVENT(eventID, function)        Spartan::EventSystem::Get().Subscribe(eventID, function);
+#define UNSUBSCRIBE_FROM_EVENT(eventID, function)    Spartan::EventSystem::Get().Unsubscribe(eventID, function);
+//=============================================================================================================
+
+namespace Spartan
 {
-	class ENGINE_CLASS EventSystem
-	{
-	public:
-		static EventSystem& Get()
-		{
-			static EventSystem instance;
-			return instance;
-		}
+    using subscriber = std::function<void(const Variant&)>;
 
-		typedef std::function<void(Variant)> subscriber;
+    class SPARTAN_CLASS EventSystem
+    {
+    public:
+        static EventSystem& Get()
+        {
+            static EventSystem instance;
+            return instance;
+        }
 
-		void Subscribe(Event_Type eventID, subscriber&& function)
-		{
-			m_subscribers[eventID].push_back(std::forward<subscriber>(function));
-		}
+        void Subscribe(const EventType event_id, subscriber&& function)
+        {
+            m_subscribers[event_id].push_back(std::forward<subscriber>(function));
+        }
 
-		void Unsubscribe(Event_Type eventID, subscriber&& function)
-		{
-			size_t function_adress	= *(long*)(char*)&function;
-			auto& subscribers		= m_subscribers[eventID];
+        void Unsubscribe(const EventType event_id, subscriber&& function)
+        {
+            const size_t function_adress    = *reinterpret_cast<long*>(reinterpret_cast<char*>(&function));
+            auto& subscribers                = m_subscribers[event_id];
 
-			for (auto it = subscribers.begin(); it != subscribers.end();)
-			{
-				size_t subscriber_adress = *(long*)(char*)&(*it);
-				if (subscriber_adress == function_adress)
-				{
-					it = subscribers.erase(it);
-					return;
-				}
-			}
-		}
+            for (auto it = subscribers.begin(); it != subscribers.end();)
+            {
+                const size_t subscriber_adress = *reinterpret_cast<long*>(reinterpret_cast<char*>(&(*it)));
+                if (subscriber_adress == function_adress)
+                {
+                    it = subscribers.erase(it);
+                    return;
+                }
+            }
+        }
 
-		void Fire(Event_Type eventID, const Variant& data = 0)
-		{
-			if (m_subscribers.find(eventID) == m_subscribers.end())
-				return;
+        void Fire(const EventType event_id, const Variant& data = 0)
+        {
+            if (m_subscribers.find(event_id) == m_subscribers.end())
+                return;
 
-			for (const auto& subscriber : m_subscribers[eventID])
-			{
-				subscriber(data);
-			}
-		}
+            for (const auto& subscriber : m_subscribers[event_id])
+            {
+                subscriber(data);
+            }
+        }
 
-		void Clear() 
-		{
-			m_subscribers.clear(); 
-		}
+        void Clear() 
+        {
+            m_subscribers.clear(); 
+        }
 
-	private:
-		std::map<Event_Type, std::vector<subscriber>> m_subscribers;
-	};
+    private:
+        std::unordered_map<EventType, std::vector<subscriber>> m_subscribers;
+    };
 }

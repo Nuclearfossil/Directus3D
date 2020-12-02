@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,149 +19,159 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#pragma once
-
-//= INCLUDES =========================
+//= INCLUDES ================================
+#include "Spartan.h"
 #include "Transform_Gizmo.h"
-#include "..\Model.h"
-#include "..\..\RHI\RHI_Vertex.h"
-#include "..\..\RHI\RHI_IndexBuffer.h"
-#include "..\..\World\Entity.h"
-#include "..\..\Input\Input.h"
-//====================================
+#include "../Model.h"
+#include "../../RHI/RHI_IndexBuffer.h"
+#include "../../Input/Input.h"
+#include "../../World/World.h"
+#include "../../World/Entity.h"
+#include "../../World/Components/Camera.h"
+#include "../../World/Components/Transform.h"
+//===========================================
 
-//=============================
+//============================
 using namespace std;
-using namespace Directus::Math;
-//=============================
+using namespace Spartan::Math;
+//============================
 
-namespace Directus
+namespace Spartan
 {
-	Transform_Gizmo::Transform_Gizmo(Context* context)
-	{
-		m_context	= context;
-		m_input		= m_context->GetSubsystem<Input>().get();
-		m_world		= m_context->GetSubsystem<World>().get();
-		m_type		= TransformHandle_Position;
-		m_space		= TransformHandle_World;
-		m_isEditing	= false;
+    Transform_Gizmo::Transform_Gizmo(Context* context)
+    {
+        m_context        = context;
+        m_input            = m_context->GetSubsystem<Input>();
+        m_world            = m_context->GetSubsystem<World>();
+        m_type            = TransformHandle_Position;
+        m_space            = TransformHandle_World;
+        m_is_editing    = false;
 
-		// Handles
-		m_handle_position.Initialize(TransformHandle_Position, context);
-		m_handle_rotation.Initialize(TransformHandle_Rotation, context);
-		m_handle_scale.Initialize(TransformHandle_Scale, context);
-	}
+        // Handles
+        m_handle_position.Initialize(TransformHandle_Position, context);
+        m_handle_rotation.Initialize(TransformHandle_Rotation, context);
+        m_handle_scale.Initialize(TransformHandle_Scale, context);
+    }
 
-	Transform_Gizmo::~Transform_Gizmo()
-	{
+    std::weak_ptr<Spartan::Entity> Transform_Gizmo::SetSelectedEntity(const shared_ptr<Entity>& entity)
+    {
+        // Update picked entity only when it's not being edited
+        if (!m_is_editing && !m_just_finished_editing)
+        {
+            m_entity_selected = entity;
+        }
 
-	}
+        return m_entity_selected;
+    }
 
-	bool Transform_Gizmo::Update(const shared_ptr<Entity>& entity, Camera* camera, float handle_size, float handle_speed)
-	{
-		// Switch between handles with W, E and R
-		if (m_input->GetKeyDown(W))
-		{
-			m_type = TransformHandle_Position;
-		}
-		else if(m_input->GetKeyDown(E))
-		{
-			m_type = TransformHandle_Scale;
-		}
-		else if (m_input->GetKeyDown(R))
-		{
-			m_type = TransformHandle_Rotation;
-		}
+    bool Transform_Gizmo::Update(Camera* camera, const float handle_size, const float handle_speed)
+    {
+        m_just_finished_editing = false;
 
-		// If there is no camera, don't even bother
-		if (!camera)
-			return false;
+        Entity* selected_entity = m_entity_selected.lock().get();
 
-		// Don't erase picked entity if it's currently being edited
-		if (!entity)
-		{
-			m_selectedentity = m_isEditing ? m_selectedentity : nullptr;
-		}
+        // If there is no camera, don't even bother
+        if (!camera || !selected_entity)
+        {
+            m_is_editing = false;
+            return false;
+        }
 
-		// Update picked entity only if it's not being edited
-		if (!m_isEditing)
-		{
-			m_selectedentity = entity;
-		}
+        // If the selected entity is the actual viewport camera, ignore the input
+        if (selected_entity->GetId() == camera->GetTransform()->GetEntity()->GetId())
+        {
+            m_is_editing = false;
+            return false;
+        }
 
-		// If there is a valid entity, update the handle
-		if (m_selectedentity)
-		{
-			if (m_type == TransformHandle_Position)
-			{
-				m_isEditing = m_handle_position.Update(m_space, m_selectedentity, camera, handle_size, handle_speed);
-			}
-			else if (m_type == TransformHandle_Scale)
-			{
-				m_isEditing = m_handle_scale.Update(m_space, m_selectedentity, camera, handle_size, handle_speed);
-			}
-			else if (m_type == TransformHandle_Rotation)
-			{
-				m_isEditing = m_handle_rotation.Update(m_space, m_selectedentity, camera, handle_size, handle_speed);
-			}
-		}
+        // Switch between position, rotation and scale handles, with W, E and R respectively
+        if (m_input->GetKeyDown(KeyCode::W))
+        {
+            m_type = TransformHandle_Position;
+        }
+        else if (m_input->GetKeyDown(KeyCode::E))
+        {
+            m_type = TransformHandle_Scale;
+        }
+        else if (m_input->GetKeyDown(KeyCode::R))
+        {
+            m_type = TransformHandle_Rotation;
+        }
 
-		return m_selectedentity != nullptr;
-	}
+        const bool was_editing = m_is_editing;
 
-	unsigned int Transform_Gizmo::GetIndexCount()
-	{
-		if (m_type == TransformHandle_Position)
-		{
-			return m_handle_position.GetIndexBuffer()->GetIndexCount();
-		}
-		else if (m_type == TransformHandle_Scale)
-		{
-			return m_handle_scale.GetIndexBuffer()->GetIndexCount();
-		}
+        // Update appropriate handle
+        if (m_type == TransformHandle_Position)
+        {
+            m_is_editing = m_handle_position.Update(m_space, selected_entity, camera, handle_size, handle_speed);
+        }
+        else if (m_type == TransformHandle_Scale)
+        {
+            m_is_editing = m_handle_scale.Update(m_space, selected_entity, camera, handle_size, handle_speed);
+        }
+        else if (m_type == TransformHandle_Rotation)
+        {
+            m_is_editing = m_handle_rotation.Update(m_space, selected_entity, camera, handle_size, handle_speed);
+        }
 
-		return m_handle_rotation.GetIndexBuffer()->GetIndexCount();
-	}
+        m_just_finished_editing = was_editing && !m_is_editing;
 
-	shared_ptr<RHI_VertexBuffer> Transform_Gizmo::GetVertexBuffer()
-	{
-		if (m_type == TransformHandle_Position)
-		{
-			return m_handle_position.GetVertexBuffer();
-		}
-		else if (m_type == TransformHandle_Scale)
-		{
-			return m_handle_scale.GetVertexBuffer();
-		}
+        return true;
+    }
 
-		return m_handle_rotation.GetVertexBuffer();
-	}
+    uint32_t Transform_Gizmo::GetIndexCount() const
+    {
+        if (m_type == TransformHandle_Position)
+        {
+            return m_handle_position.GetIndexBuffer()->GetIndexCount();
+        }
+        else if (m_type == TransformHandle_Scale)
+        {
+            return m_handle_scale.GetIndexBuffer()->GetIndexCount();
+        }
 
-	shared_ptr<RHI_IndexBuffer> Transform_Gizmo::GetIndexBuffer()
-	{
-		if (m_type == TransformHandle_Position)
-		{
-			return m_handle_position.GetIndexBuffer();
-		}
-		else if (m_type == TransformHandle_Scale)
-		{
-			return m_handle_scale.GetIndexBuffer();
-		}
+        return m_handle_rotation.GetIndexBuffer()->GetIndexCount();
+    }
 
-		return m_handle_rotation.GetIndexBuffer();
-	}
+    const RHI_VertexBuffer* Transform_Gizmo::GetVertexBuffer() const
+    {
+        if (m_type == TransformHandle_Position)
+        {
+            return m_handle_position.GetVertexBuffer();
+        }
+        else if (m_type == TransformHandle_Scale)
+        {
+            return m_handle_scale.GetVertexBuffer();
+        }
 
-	 const TransformHandle& Transform_Gizmo::GetHandle() const
-	 {
-		 if (m_type == TransformHandle_Position)
-		 {
-			 return m_handle_position;
-		 }
-		 else if (m_type == TransformHandle_Scale)
-		 {
-			 return m_handle_scale;
-		 }
+        return m_handle_rotation.GetVertexBuffer();
+    }
 
-		 return m_handle_rotation;
-	 }
+    const RHI_IndexBuffer* Transform_Gizmo::GetIndexBuffer() const
+    {
+        if (m_type == TransformHandle_Position)
+        {
+            return m_handle_position.GetIndexBuffer();
+        }
+        else if (m_type == TransformHandle_Scale)
+        {
+            return m_handle_scale.GetIndexBuffer();
+        }
+
+        return m_handle_rotation.GetIndexBuffer();
+    }
+
+     const TransformHandle& Transform_Gizmo::GetHandle() const
+     {
+         if (m_type == TransformHandle_Position)
+         {
+             return m_handle_position;
+         }
+         else if (m_type == TransformHandle_Scale)
+         {
+             return m_handle_scale;
+         }
+
+         return m_handle_rotation;
+     }
 }

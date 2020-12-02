@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,35 +21,74 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==============
-#include "RHI_Definition.h"
-#include "RHI_Object.h"
+//= INCLUDES ======================
 #include <vector>
-//=========================
+#include "../Core/Spartan_Object.h"
+//=================================
 
-namespace Directus
+namespace Spartan
 {
-	class RHI_IndexBuffer : public RHI_Object
-	{
-	public:
-		RHI_IndexBuffer(std::shared_ptr<RHI_Device> rhiDevice, RHI_Format format = Format_R32_UINT);
-		~RHI_IndexBuffer();
-	
-		bool Create(const std::vector<unsigned int>& indices);
-		bool CreateDynamic(unsigned int stride, unsigned int indexCount);
-		void* Map();
-		bool Unmap();
+    class RHI_IndexBuffer : public Spartan_Object
+    {
+    public:
+        RHI_IndexBuffer(const std::shared_ptr<RHI_Device>& rhi_device)
+        {
+            m_rhi_device = rhi_device;
+        }
 
-		void* GetBuffer()				{ return m_buffer; }
-		RHI_Format GetFormat()			{ return m_bufferFormat; }
-		unsigned int GetMemoryUsage()	{ return m_memoryUsage; }
-		unsigned int GetIndexCount()	{ return m_indexCount; }
+        ~RHI_IndexBuffer()
+        {
+            _destroy();
+        }
+    
+        template<typename T>
+        bool Create(const std::vector<T>& indices)
+        {
+            m_stride        = sizeof(T);
+            m_index_count   = static_cast<uint32_t>(indices.size());
+            m_size_gpu      = static_cast<uint64_t>(m_stride * m_index_count);
+            return _create(static_cast<const void*>(indices.data()));
+        }
 
-	protected:
-		unsigned int m_indexCount	= 0;
-		unsigned int m_memoryUsage	= 0;
-		RHI_Format m_bufferFormat;
-		void* m_buffer				= nullptr;
-		std::shared_ptr<RHI_Device> m_rhiDevice;
-	};
+        template<typename T>
+        bool Create(const T* indices, const uint32_t index_count)
+        {
+            m_stride        = sizeof(T);
+            m_index_count   = index_count;
+            m_size_gpu      = static_cast<uint64_t>(m_stride * m_index_count);
+            return _create(static_cast<const void*>(indices));
+        }
+
+        template<typename T>
+        bool CreateDynamic(const uint32_t index_count)
+        {
+            m_stride        = sizeof(T);
+            m_index_count   = index_count;
+            m_size_gpu      = static_cast<uint64_t>(m_stride * m_index_count);
+            return _create(nullptr);
+        }
+
+        void* Map();
+        bool Unmap();
+
+        void* GetResource()         const { return m_buffer; }
+        uint32_t GetIndexCount()    const { return m_index_count; }
+        bool Is16Bit()              const { return sizeof(uint16_t) == m_stride; }
+        bool Is32Bit()              const { return sizeof(uint32_t) == m_stride; }
+
+    protected:
+        bool _create(const void* indices);
+        void _destroy();
+
+        bool m_persistent_mapping   = true; // only affects Vulkan
+        void* m_mapped              = nullptr;
+        uint32_t m_stride           = 0;
+        uint32_t m_index_count      = 0;
+        
+        // API
+        std::shared_ptr<RHI_Device> m_rhi_device;
+        void* m_buffer      = nullptr;
+        void* m_allocation  = nullptr;
+        bool m_is_mappable  = true;
+    };
 }

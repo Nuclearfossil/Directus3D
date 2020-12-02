@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -23,196 +23,168 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 //= INCLUDES =====================
 #include <vector>
-#include "World.h"
-#include "Components/IComponent.h"
-#include "../Core/Context.h"
 #include "../Core/EventSystem.h"
+#include "Components/IComponent.h"
 //================================
 
-namespace Directus
+namespace Spartan
 {
-	class Transform;
-	class Renderable;
-	#define ValidateComponentType(T) static_assert(std::is_base_of<IComponent, T>::value, "Provided type does not implement IComponent")
+    class Context;
+    class Transform;
+    class Renderable;
+    
+    class SPARTAN_CLASS Entity : public Spartan_Object, public std::enable_shared_from_this<Entity>
+    {
+    public:
+        Entity(Context* context, uint32_t transform_id = 0);
+        ~Entity();
 
-	class ENGINE_CLASS Entity : public std::enable_shared_from_this<Entity>
-	{
-	public:
-		Entity(Context* context);
-		~Entity();
+        void Clone();
+        void Start();
+        void Stop();
+        void Tick(float delta_time);
+        void Serialize(FileStream* stream);
+        void Deserialize(FileStream* stream, Transform* parent);
 
-		void Initialize(Transform* transform);
-		void Clone();
+        //= PROPERTIES ===================================================================================================
+        const std::string& GetName() const                                { return m_name; }
+        void SetName(const std::string& name)                            { m_name = name; }
 
-		//============
-		void Start();
-		void Stop();
-		void Tick();
-		//============
+        bool IsActive() const                                            { return m_is_active; }
+        void SetActive(const bool active)                                { m_is_active = active; }
 
-		void Serialize(FileStream* stream);
-		void Deserialize(FileStream* stream, Transform* parent);
+        bool IsVisibleInHierarchy() const                                { return m_hierarchy_visibility; }
+        void SetHierarchyVisibility(const bool hierarchy_visibility)    { m_hierarchy_visibility = hierarchy_visibility; }
+        //================================================================================================================
 
-		//= PROPERTIES =========================================================================================
-		const std::string& GetName()			{ return m_name; }
-		void SetName(const std::string& name)	{ m_name = name; }
+        // Adds a component of type T
+        template <class T>
+        T* AddComponent(uint32_t id = 0)
+        {
+            const ComponentType type = IComponent::TypeToEnum<T>();
 
-		unsigned int GetID()		{ return m_ID; }
-		void SetID(unsigned int ID) { m_ID = ID; }
+            // Return component in case it already exists while ignoring Script components (they can exist multiple times)
+            if (HasComponent(type) && type != ComponentType::Script)
+                return GetComponent<T>();
 
-		bool IsActive()				{ return m_isActive; }
-		void SetActive(bool active) { m_isActive = active; }
+            // Create a new component
+            std::shared_ptr<T> component = std::make_shared<T>(m_context, this, id);
 
-		bool IsVisibleInHierarchy()								{ return m_hierarchyVisibility; }
-		void SetHierarchyVisibility(bool hierarchyVisibility)	{ m_hierarchyVisibility = hierarchyVisibility; }
-		//======================================================================================================
+            // Save new component
+            m_components.emplace_back(std::static_pointer_cast<IComponent>(component));
+            m_component_mask |= GetComponentMask(type);
 
-		//= COMPONENTS =========================================================================================
-		// Adds a component of type T
-		template <class T>
-		std::shared_ptr<T> AddComponent()
-		{
-			ValidateComponentType(T);
-			ComponentType type = IComponent::Type_To_Enum<T>();
+            // Caching of rendering performance critical components
+            if constexpr (std::is_same<T, Transform>::value)    { m_transform   = static_cast<Transform*>(component.get()); }
+            if constexpr (std::is_same<T, Renderable>::value)   { m_renderable  = static_cast<Renderable*>(component.get()); }
 
-			// Return component in case it already exists while ignoring Script components (they can exist multiple times)
-			if (HasComponent(type) && type != ComponentType_Script)
-				return GetComponent<T>();
+            // Initialize component
+            component->SetType(type);
+            component->OnInitialize();
 
-			// Add component
-			m_components.emplace_back
-			(	
-				std::make_shared<T>
-				(
-					m_context,
-					this,
-					GetTransform_PtrRaw()
-				)
-			);
+            // Make the scene resolve
+            FIRE_EVENT(EventType::WorldResolve);
 
-			auto newComponent = std::static_pointer_cast<T>(m_components.back());
-			newComponent->SetType(IComponent::Type_To_Enum<T>());
-			newComponent->OnInitialize();
+            return component.get();
+        }
 
-			// Caching of rendering performance critical components
-			if (newComponent->GetType() == ComponentType_Renderable)
-			{
-				m_renderable = (Renderable*)newComponent.get();
-			}
+        // Adds a component of ComponentType 
+        IComponent* AddComponent(ComponentType type, uint32_t id = 0);
 
-			// Make the scene resolve
-			FIRE_EVENT(Event_World_Resolve);
+        // Returns a component of type T (if it exists)
+        template <class T>
+        T* GetComponent()
+        {
+            const ComponentType type = IComponent::TypeToEnum<T>();
 
-			return newComponent;
-		}
+            if (!HasComponent(type))
+                return nullptr;
 
-		std::shared_ptr<IComponent> AddComponent(ComponentType type);
+            for (const auto& component : m_components)
+            {
+                if (component->GetType() == type)
+                    return static_cast<T*>(component.get());
+            }
 
-		// Returns a component of type T (if it exists)
-		template <class T>
-		std::shared_ptr<T> GetComponent()
-		{
-			ValidateComponentType(T);
-			ComponentType type = IComponent::Type_To_Enum<T>();
+            return nullptr;
+        }
 
-			for (const auto& component : m_components)
-			{
-				if (component->GetType() == type)
-					return std::static_pointer_cast<T>(component);
-			}
+        // Returns any components of type T (if they exist)
+        template <class T>
+        std::vector<T*> GetComponents()
+        {
+            std::vector<T*> components;
+            const ComponentType type = IComponent::TypeToEnum<T>();
 
-			return nullptr;
-		}
+            if (!HasComponent(type))
+                return components;
+        
+            for (const auto& component : m_components)
+            {
+                if (component->GetType() != type)
+                    continue;
 
-		// Returns any components of type T (if they exist)
-		template <class T>
-		std::vector<std::shared_ptr<T>> GetComponents()
-		{
-			ValidateComponentType(T);
-			ComponentType type = IComponent::Type_To_Enum<T>();
+                components.emplace_back(static_cast<T*>(component.get()));
+            }
 
-			std::vector<std::shared_ptr<T>> components;
-			for (const auto& component : m_components)
-			{
-				if (component->GetType() != type)
-					continue;
+            return components;
+        }
+        
+        // Checks if a component exists
+        constexpr bool HasComponent(const ComponentType type) { return m_component_mask & GetComponentMask(type); }
 
-				components.emplace_back(std::static_pointer_cast<T>(component));
-			}
+        // Checks if a component exists
+        template <class T>
+        bool HasComponent() { return HasComponent(IComponent::TypeToEnum<T>()); }
 
-			return components;
-		}
-		
-		// Checks if a component of ComponentType exists
-		bool HasComponent(ComponentType type) 
-		{ 
-			for (const auto& component : m_components)
-			{
-				if (component->GetType() == type)
-					return true;
-			}
+        // Removes a component (if it exists)
+        template <class T>
+        void RemoveComponent()
+        {
+            const ComponentType type = IComponent::TypeToEnum<T>();
 
-			return false;
-		}
+            for (auto it = m_components.begin(); it != m_components.end();)
+            {
+                auto component = *it;
+                if (component->GetType() == type)
+                {
+                    component->OnRemove();
+                    it = m_components.erase(it);
+                    m_component_mask &= ~GetComponentMask(type);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
 
-		// Checks if a component of type T exists
-		template <class T>
-		bool HasComponent() 
-		{ 
-			ValidateComponentType(T);
-			return HasComponent(IComponent::Type_To_Enum<T>()); 
-		}
+            // Make the scene resolve
+            FIRE_EVENT(Event_World_Resolve_Pending);
+        }
 
-		// Removes a component of type T (if it exists)
-		template <class T>
-		void RemoveComponent()
-		{
-			ValidateComponentType(T);
-			ComponentType type = IComponent::Type_To_Enum<T>();
+        void RemoveComponentById(uint32_t id);
+        const auto& GetAllComponents() const { return m_components; }
 
-			for (auto it = m_components.begin(); it != m_components.end();)
-			{
-				auto component = *it;
-				if (component->GetType() == type)
-				{
-					component->OnRemove();
-					component.reset();
-					it = m_components.erase(it);
-				}
-				else
-				{
-					++it;
-				}
-			}
+        void MarkForDestruction()           { m_destruction_pending = true; }
+        bool IsPendingDestruction() const   { return m_destruction_pending; }
 
-			// Make the scene resolve
-			FIRE_EVENT(Event_World_Resolve);
-		}
+        // Direct access for performance critical usage (not safe)
+        Transform* GetTransform() const            { return m_transform; }
+        Renderable* GetRenderable() const        { return m_renderable; }
+        std::shared_ptr<Entity> GetPtrShared()  { return shared_from_this(); }
 
-		void RemoveComponentByID(unsigned int id);
+    private:
+        constexpr uint32_t GetComponentMask(ComponentType type) { return static_cast<uint32_t>(1) << static_cast<uint32_t>(type); }
 
-		const auto& GetAllComponents() { return m_components; }
-		//======================================================================================================
-
-		// Direct access for performance critical usage (not safe)
-		Transform* GetTransform_PtrRaw()		{ return m_transform; }
-		Renderable* GetRenderable_PtrRaw()		{ return m_renderable; }
-		std::shared_ptr<Entity> GetPtrShared()	{ return shared_from_this(); }
-
-	private:
-		unsigned int m_ID			= 0;
-		std::string m_name			= "Entity";
-		bool m_isActive				= true;
-		bool m_hierarchyVisibility	= true;
-		// Caching of performance critical components
-		Transform* m_transform		= nullptr;
-		Renderable* m_renderable	= nullptr;
-
-		// Components
-		std::vector<std::shared_ptr<IComponent>> m_components;
-		std::shared_ptr<Entity> m_componentEmpty;
-
-		// Misc
-		Context* m_context;
-	};
+        std::string m_name            = "Entity";
+        bool m_is_active            = true;
+        bool m_hierarchy_visibility    = true;
+        Transform* m_transform        = nullptr;
+        Renderable* m_renderable    = nullptr;
+        bool m_destruction_pending  = false;
+        
+        // Components
+        std::vector<std::shared_ptr<IComponent>> m_components;
+        uint32_t m_component_mask = 0;
+    };
 }

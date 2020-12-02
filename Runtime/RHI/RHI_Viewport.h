@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,60 +21,70 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
-#include "../Core/EngineDefs.h"
-#include "RHI_Object.h"
-//=============================
+//= INCLUDES ======================
+#include "../Core/Spartan_Object.h"
+//=================================
 
-namespace Directus
+namespace Spartan
 {
-	class ENGINE_CLASS RHI_Viewport : public RHI_Object
-	{
-	public:
-		RHI_Viewport(float x = 0.0f, float y = 0.0f, float width = 0.0f, float height = 0.0f, float minDepth = 0.0f, float maxDepth = 1.0f)
-		{
-			m_x			= x;
-			m_y			= y;
-			m_width		= width;
-			m_height	= height;
-			m_minDepth	= minDepth;
-			m_maxDepth	= maxDepth;
-		}
+    class SPARTAN_CLASS RHI_Viewport : public Spartan_Object
+    {
+    public:
+        RHI_Viewport(const float x = 0.0f, const float y = 0.0f, const float width = 0.0f, const float height = 0.0f, const float depth_min = 0.0f, const float depth_max = 1.0f)
+        {
+            this->x            = x;
+            this->y            = y;
+            this->width        = width;
+            this->height    = height;
+            this->depth_min    = depth_min;
+            this->depth_max    = depth_max;
+        }
 
-		~RHI_Viewport(){}
+        RHI_Viewport(const RHI_Viewport& viewport)
+        {
+            x            = viewport.x;
+            y            = viewport.y;
+            width        = viewport.width;
+            height        = viewport.height;
+            depth_min    = viewport.depth_min;
+            depth_max    = viewport.depth_max;
+        }
 
-		bool operator==(const RHI_Viewport& rhs) const
-		{
-			return 
-				m_x			== rhs.m_x			&& m_y			== rhs.m_y && 
-				m_width		== rhs.m_width		&& m_height		== rhs.m_height && 
-				m_minDepth	== rhs.m_minDepth	&& m_maxDepth	== rhs.m_maxDepth;
-		}
+        ~RHI_Viewport() = default;
 
-		bool operator!=(const RHI_Viewport& rhs) const
-		{
-			return !(*this == rhs);
-		}
+        bool operator==(const RHI_Viewport& rhs) const
+        {
+            return 
+                x            == rhs.x            && y            == rhs.y && 
+                width        == rhs.width        && height        == rhs.height && 
+                depth_min    == rhs.depth_min    && depth_max    == rhs.depth_max;
+        }
 
-		float GetX() const				{ return m_x; }
-		float GetY() const				{ return m_y; }
-		float GetWidth() const			{ return m_width; }
-		float GetHeight() const			{ return m_height; }
-		float GetMinDepth() const		{ return m_minDepth; }
-		float GetMaxDepth() const		{ return m_maxDepth; }
-		float GetAspectRatio() const	{ return m_width / m_height; }
+        bool operator!=(const RHI_Viewport& rhs) const
+        {
+            return !(*this == rhs);
+        }
 
-		void SetPosX(float x)			{ m_x = x; }
-		void SetPosY(float y)			{ m_y = y; }
-		void SetWidth(float width)		{ m_width	= width; }
-		void SetHeight(float height)	{ m_height	= height; }
+        bool IsDefined() const            
+        {
+            return
+                x            != 0.0f || 
+                y            != 0.0f || 
+                width        != 0.0f || 
+                height        != 0.0f || 
+                depth_min    != 0.0f || 
+                depth_max    != 0.0f;
+        }
 
-	private:
-		float m_x;
-		float m_y;
-		float m_width;
-		float m_height;
-		float m_minDepth;
-		float m_maxDepth;
-	};
+        float AspectRatio()    const { return width / height; }
+
+        float x            = 0.0f;
+        float y            = 0.0f;
+        float width        = 0.0f;
+        float height    = 0.0f;
+        float depth_min    = 0.0f;
+        float depth_max    = 0.0f;
+
+        static const RHI_Viewport Undefined;
+    };
 }

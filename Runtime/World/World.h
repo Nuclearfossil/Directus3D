@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,83 +21,74 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==================
+//= INCLUDES ===========================
 #include <vector>
 #include <memory>
-#include "../Core/EngineDefs.h"
+#include <string>
 #include "../Core/ISubsystem.h"
-//=============================
+#include "../Core/Spartan_Definitions.h"
+//======================================
 
-namespace Directus
+namespace Spartan
 {
-	class Entity;
-	class Light;
-	class Input;
-	class Profiler;
+    class Entity;
+    class Light;
+    class Input;
+    class Profiler;
 
-	enum Scene_State
-	{
-		Ticking,
-		Idle,
-		Request_Loading,
-		Loading
-	};
+    enum class WorldState
+    {
+        Ticking,
+        Idle,
+        RequestLoading,
+        Loading
+    };
 
-	class ENGINE_CLASS World : public ISubsystem
-	{
-	public:
-		World(Context* context);
-		~World();
+    class SPARTAN_CLASS World : public ISubsystem
+    {
+    public:
+        World(Context* context);
+        ~World();
 
-		//= ISubsystem ============
-		bool Initialize() override;
-		void Tick() override;
-		//=========================
-		
-		void Unload();
+        //= ISubsystem ======================
+        bool Initialize() override;
+        void Tick(float delta_time) override;
+        //===================================
+        
+        void Unload();
+        bool SaveToFile(const std::string& filePath);
+        bool LoadFromFile(const std::string& file_path);
+        const auto& GetName() const { return m_name; }
+        void MakeDirty() { m_is_dirty = true; }
 
-		//= IO ========================================
-		bool SaveToFile(const std::string& filePath);
-		bool LoadFromFile(const std::string& filePath);
-		//=============================================
+        //= Entities ===========================================================================
+        std::shared_ptr<Entity>& EntityCreate(bool is_active = true);
+        std::shared_ptr<Entity>& EntityAdd(const std::shared_ptr<Entity>& entity);
+        bool EntityExists(const std::shared_ptr<Entity>& entity);
+        void EntityRemove(const std::shared_ptr<Entity>& entity);    
+        std::vector<std::shared_ptr<Entity>> EntityGetRoots();
+        const std::shared_ptr<Entity>& EntityGetByName(const std::string& name);
+        const std::shared_ptr<Entity>& EntityGetById(uint32_t id);
+        const auto& EntityGetAll() const    { return m_entities; }
+        auto EntityGetCount() const         { return static_cast<uint32_t>(m_entities.size()); }
+        //======================================================================================
 
-		//= entity HELPER FUNCTIONS ===============================================================
-		std::shared_ptr<Entity>& Entity_Create();
-		std::shared_ptr<Entity>& Entity_Add(const std::shared_ptr<Entity>& entity);
-		bool entity_Exists(const std::shared_ptr<Entity>& entity);
-		void Entity_Remove(const std::shared_ptr<Entity>& entity);
-		const std::vector<std::shared_ptr<Entity>>& Entities_GetAll() { return m_entitiesPrimary; }
-		std::vector<std::shared_ptr<Entity>> Entities_GetRoots();
-		const std::shared_ptr<Entity>& Entity_GetByName(const std::string& name);
-		const std::shared_ptr<Entity>& Entity_GetByID(unsigned int ID);
-		int Entity_GetCount() { return (int)m_entitiesPrimary.size(); }
-		//=========================================================================================
+    private:
+        void _EntityRemove(const std::shared_ptr<Entity>& entity);
 
-		//= SELECTED ENTITY ===================================================================
-		std::shared_ptr<Entity> GetSelectedentity()				{ return m_entity_selected; }
-		void SetSelectedentity(std::shared_ptr<Entity> entity)	{ m_entity_selected = entity; }
-		//=====================================================================================
+        //= COMMON ENTITY CREATION ========================
+        std::shared_ptr<Entity>& CreateEnvironment();
+        std::shared_ptr<Entity> CreateCamera();
+        std::shared_ptr<Entity>& CreateDirectionalLight();
+        //================================================
 
-		// Picks the closest entity under the mouse cursor
-		void Pickentity();
+        std::string m_name;
+        bool m_was_in_editor_mode   = false;
+        bool m_is_dirty             = true;
+        WorldState m_state          = WorldState::Ticking;
+        Input* m_input              = nullptr;
+        Profiler* m_profiler        = nullptr;
 
-	private:
-		//= COMMON entity CREATION =======================
-		std::shared_ptr<Entity>& CreateSkybox();
-		std::shared_ptr<Entity> CreateCamera();
-		std::shared_ptr<Entity>& CreateDirectionalLight();
-		//===============================================
-
-		// Double-buffered entities
-		std::vector<std::shared_ptr<Entity>> m_entitiesPrimary;
-		std::vector<std::shared_ptr<Entity>> m_entitiesSecondary;
-
-		std::shared_ptr<Entity> m_entity_empty;
-		std::shared_ptr<Entity> m_entity_selected;
-		Input* m_input;
-		Profiler* m_profiler;
-		bool m_wasInEditorMode;
-		bool m_isDirty;
-		Scene_State m_state;
-	};
+        std::vector<std::shared_ptr<Entity>> m_entities;
+    };
 }

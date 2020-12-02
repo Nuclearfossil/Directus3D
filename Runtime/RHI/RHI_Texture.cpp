@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,221 +19,296 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES =========================
+//= INCLUDES ================================
+#include "Spartan.h"
 #include "RHI_Texture.h"
 #include "RHI_Device.h"
 #include "../IO/FileStream.h"
 #include "../Rendering/Renderer.h"
 #include "../Resource/ResourceCache.h"
-//====================================
+#include "../Resource/Import/ImageImporter.h"
+//===========================================
 
 //= NAMESPACES =====
 using namespace std;
 //==================
 
-namespace Directus
+namespace Spartan
 {
-	RHI_Texture::RHI_Texture(Context* context) : IResource(context, Resource_Texture)
-	{
-		m_format	= Format_R8G8B8A8_UNORM;
-		m_rhiDevice	= context->GetSubsystem<Renderer>()->GetRHIDevice();
-	}
+    RHI_Texture::RHI_Texture(Context* context) : IResource(context, ResourceType::Texture)
+    {
+        m_rhi_device = context->GetSubsystem<Renderer>()->GetRhiDevice();
+    }
 
-	//= RESOURCE INTERFACE =====================================================================
-	bool RHI_Texture::SaveToFile(const string& filePath)
-	{
-		return Serialize(filePath);
-	}
+    RHI_Texture::~RHI_Texture()
+    {
+        m_data.clear();
+        m_data.shrink_to_fit();
+    }
 
-	bool RHI_Texture::LoadFromFile(const string& rawFilePath)
-	{
-		// Make the path, relative to the engine and validate it
-		auto filePath = FileSystem::GetRelativeFilePath(rawFilePath);
-		if (!FileSystem::FileExists(filePath))
-		{
-			LOGF_ERROR("Path \"%s\" is invalid.", filePath.c_str());
-			return false;
-		}
+    bool RHI_Texture::SaveToFile(const string& file_path)
+    {
+        // Check to see if the file already exists (if so, get the byte count)
+        uint32_t byte_count = 0;
+        {
+            if (FileSystem::Exists(file_path))
+            {
+                auto file = make_unique<FileStream>(file_path, FileStream_Read);
+                if (file->IsOpen())
+                {
+                    file->Read(&byte_count);
+                }
+            }
+        }
 
-		m_mipChain.clear();
-		m_mipChain.shrink_to_fit();
-		SetLoadState(LoadState_Started);
+        auto append = true;
+        auto file = make_unique<FileStream>(file_path, FileStream_Write | FileStream_Append);
+        if (!file->IsOpen())
+            return false;
 
-		// Load from disk
-		bool dataLoaded = false;
-		// engine format (binary)
-		if (FileSystem::IsEngineTextureFile(filePath))
-		{
-			dataLoaded = Deserialize(filePath);
-		}
-		// foreign format (most known image formats)
-		else if (FileSystem::IsSupportedImageFile(filePath))
-		{
-			dataLoaded = LoadFromForeignFormat(filePath);
-		}
+        // If the existing file has a byte count but we 
+        // hold no data, don't overwrite the file's bytes.
+        if (byte_count != 0 && m_data.empty())
+        {
+            file->Skip
+            (
+                sizeof(uint32_t) +    // byte count
+                sizeof(uint32_t) +    // mipmap count
+                byte_count            // bytes
+            );
+        }
+        else
+        {
+            byte_count = GetByteCount();
 
-		if (!dataLoaded)
-		{
-			LOGF_ERROR("Failed to load \"%s\".", filePath.c_str());
-			SetLoadState(LoadState_Failed);
-			return false;
-		}
+            // Write byte count
+            file->Write(byte_count);
+            // Write mipmap count
+            file->Write(static_cast<uint32_t>(m_data.size()));
+            // Write bytes
+            for (auto& mip : m_data)
+            {
+                file->Write(mip);
+            }
 
-		// Validate loaded data
-		if (m_width == 0 || m_height == 0 || m_channels == 0 || m_mipChain.empty() || m_mipChain.front().empty())
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			SetLoadState(LoadState_Failed);
-			return false;
-		}
+            // The bytes have been saved, so we can now free some memory
+            m_data.clear();
+            m_data.shrink_to_fit();
+        }
 
-		// Create shader resource
-		bool srvCreated = HasMipChain() ?
-			ShaderResource_Create2D(m_width, m_height, m_channels, m_format, m_mipChain) :
-			ShaderResource_Create2D(m_width, m_height, m_channels, m_format, m_mipChain.front(), m_needsMipChain);
+        // Write properties
+        file->Write(m_bits_per_channel);
+        file->Write(m_width);
+        file->Write(m_height);
+        file->Write(static_cast<uint32_t>(m_format));
+        file->Write(m_channel_count);
+        file->Write(m_flags);
+        file->Write(GetId());
+        file->Write(GetResourceFilePath());
 
-		// Only clear texture bytes if that's an engine texture, if not, they are not serialized yet.
-		if (FileSystem::IsEngineTextureFile(filePath)) { ClearTextureBytes(); }
+        return true;
+    }
 
-		if (!srvCreated) 
-		{ 
-			LOGF_ERROR("Failed to create shader resource for \"%s\".", m_resourceFilePath.c_str()); 
-			SetLoadState(LoadState_Failed);
-			return false;
-		}
-		
-		SetLoadState(LoadState_Completed);
-		return true;
-	}
+    bool RHI_Texture::LoadFromFile(const string& path)
+    {
+        // Validate file path
+        if (!FileSystem::IsFile(path))
+        {
+            LOG_ERROR("\"%s\" is not a valid file path.", path.c_str());
+            return false;
+        }
 
-	unsigned int RHI_Texture::GetMemoryUsage()
-	{
-		// Compute texture bits (in case they are loaded)
-		unsigned int size = 0;
-		for (const auto& mip : m_mipChain)
-		{
-			size += (unsigned int)mip.size();
-		}
+        m_data.clear();
+        m_data.shrink_to_fit();
+        m_load_state = Started;
 
-		return size;
-	}
-	//=====================================================================================
+        // Load from disk
+        auto texture_data_loaded = false;        
+        if (FileSystem::IsEngineTextureFile(path)) // engine format (binary)
+        {
+            texture_data_loaded = LoadFromFile_NativeFormat(path);
+        }    
+        else if (FileSystem::IsSupportedImageFile(path)) // foreign format (most known image formats)
+        {
+            texture_data_loaded = LoadFromFile_ForeignFormat(path, m_flags & RHI_Texture_GenerateMipsWhenLoading);
+        }
 
-	MipLevel* RHI_Texture::Data_GetMipLevel(unsigned int index)
-	{
-		if (index >= m_mipChain.size())
-		{
-			LOG_WARNING("Index out of range");
-			return nullptr;
-		}
+        // Ensure that we have the data
+        if (!texture_data_loaded)
+        {
+            LOG_ERROR("Failed to load \"%s\".", path.c_str());
+            m_load_state = Failed;
+            return false;
+        }
 
-		return &m_mipChain[index];
-	}
+        m_mip_count = static_cast<uint32_t>(m_data.size());
 
-	void RHI_Texture::ClearTextureBytes()
-	{
-		for (auto& mip : m_mipChain)
-		{
-			mip.clear();
-			mip.shrink_to_fit();
-		}
-		m_mipChain.clear();
-		m_mipChain.shrink_to_fit();
-	}
+        // Create GPU resource
+        if (!m_context->GetSubsystem<Renderer>()->GetRhiDevice()->IsInitialized() || !CreateResourceGpu())
+        {
+            LOG_ERROR("Failed to create shader resource for \"%s\".", GetResourceFilePathNative().c_str());
+            m_load_state = Failed;
+            return false;
+        }
 
-	void RHI_Texture::GetTextureBytes(vector<vector<std::byte>>* textureBytes)
-	{
-		if (!m_mipChain.empty())
-		{
-			textureBytes = &m_mipChain;
-			return;
-		}
+        // Only clear texture bytes if that's an engine texture, if not, it's not serialized yet.
+        if (FileSystem::IsEngineTextureFile(path))
+        {
+            m_data.clear();
+            m_data.shrink_to_fit();
+        }
+        m_load_state = Completed;
 
-		auto file = make_unique<FileStream>(m_resourceFilePath, FileStreamMode_Read);
-		if (!file->IsOpen())
-			return;
+        // Compute memory usage
+        {
+            m_size_cpu = 0;
+            m_size_gpu = 0;
+            for (uint8_t mip_index = 0; mip_index < m_mip_count; mip_index++)
+            {
+                const uint32_t mip_width  = m_width >> mip_index;
+                const uint32_t mip_height = m_height >> mip_index;
 
-		unsigned int mipCount = file->ReadUInt();
-		for (unsigned int i = 0; i < mipCount; i++)
-		{
-			textureBytes->emplace_back(vector<std::byte>());
-			file->Read(&m_mipChain[i]);
-		}
-	}
+                m_size_cpu += mip_index < m_data.size() ? m_data[mip_index].size() * sizeof(std::byte) : 0;
+                m_size_gpu += mip_width * mip_height * (m_bits_per_channel / 8);
+            }
+        }
 
-	bool RHI_Texture::LoadFromForeignFormat(const string& filePath)
-	{
-		// Load texture
-		ImageImporter* imageImp = m_context->GetSubsystem<ResourceCache>()->GetImageImporter();	
-		if (!imageImp->Load(filePath, this))
-			return false;
+        return true;
+    }
 
-		// Change texture extension to an engine texture
-		SetResourceFilePath(FileSystem::GetFilePathWithoutExtension(filePath) + EXTENSION_TEXTURE);
-		SetResourceName(FileSystem::GetFileNameNoExtensionFromFilePath(GetResourceFilePath()));
+    vector<std::byte>& RHI_Texture::GetMip(const uint8_t index)
+    {
+        static vector<std::byte> empty;
 
-		return true;
-	}
+        if (index >= m_data.size())
+        {
+            LOG_WARNING("Index out of range");
+            return empty;
+        }
 
-	bool RHI_Texture::Serialize(const string& filePath)
-	{
-		// If the texture bits has been cleared, load it again
-		// as we don't want to replaced existing data with nothing.
-		// If the texture bits are not cleared, no loading will take place.
-		GetTextureBytes(&m_mipChain);
+        return m_data[index];
+    }
 
-		auto file = make_unique<FileStream>(filePath, FileStreamMode_Write);
-		if (!file->IsOpen())
-			return false;
+    vector<std::byte> RHI_Texture::GetOrLoadMip(const uint8_t index)
+    {
+        vector<std::byte> data;
 
-		// Write texture bits
-		file->Write((unsigned int)m_mipChain.size());
-		for (auto& mip : m_mipChain)
-		{
-			file->Write(mip);
-		}
+        // Use existing data, if it's there
+        if (index < m_data.size())
+        {
+            data = m_data[index];
+        }
+        // Else attempt to load the data
+        else
+        {
+            auto file = make_unique<FileStream>(GetResourceFilePathNative(), FileStream_Read);
+            if (file->IsOpen())
+            {
+                auto byte_count = file->ReadAs<uint32_t>();
+                const uint32_t mip_count  = file->ReadAs<uint32_t>();
 
-		// Write properties
-		file->Write(m_bpp);
-		file->Write(m_width);
-		file->Write(m_height);
-		file->Write(m_channels);
-		file->Write(m_isGrayscale);
-		file->Write(m_isTransparent);
-		file->Write(m_resourceID);
-		file->Write(m_resourceName);
-		file->Write(m_resourceFilePath);
+                if (index < mip_count)
+                {
+                    for (uint8_t i = 0; i <= index; i++)
+                    {
+                        file->Read(&data);
+                    }
+                }
+                else
+                {
+                    LOG_ERROR("Invalid index");
+                }
+                file->Close();
+            }
+            else
+            {
+                LOG_ERROR("Unable to retreive data");
+            }
+        }
 
-		ClearTextureBytes();
+        return data;
+    }
 
-		return true;
-	}
+    bool RHI_Texture::LoadFromFile_ForeignFormat(const string& file_path, const bool generate_mipmaps)
+    {
+        // Load texture
+        ImageImporter* importer = m_context->GetSubsystem<ResourceCache>()->GetImageImporter();    
+        if (!importer->Load(file_path, this, generate_mipmaps))
+            return false;
 
-	bool RHI_Texture::Deserialize(const string& filePath)
-	{
-		auto file = make_unique<FileStream>(filePath, FileStreamMode_Read);
-		if (!file->IsOpen())
-			return false;
+        // Set resource file path so it can be used by the resource cache
+        SetResourceFilePath(file_path);
 
-		// Read texture bits
-		ClearTextureBytes();
-		m_mipChain.resize(file->ReadUInt());
-		for (auto& mip : m_mipChain)
-		{
-			file->Read(&mip);
-		}
+        return true;
+    }
 
-		// Read properties
-		file->Read(&m_bpp);
-		file->Read(&m_width);
-		file->Read(&m_height);
-		file->Read(&m_channels);
-		file->Read(&m_isGrayscale);
-		file->Read(&m_isTransparent);
-		file->Read(&m_resourceID);
-		file->Read(&m_resourceName);
-		file->Read(&m_resourceFilePath);
+    bool RHI_Texture::LoadFromFile_NativeFormat(const string& file_path)
+    {
+        auto file = make_unique<FileStream>(file_path, FileStream_Read);
+        if (!file->IsOpen())
+            return false;
 
-		return true;
-	}
+        m_data.clear();
+        m_data.shrink_to_fit();
+
+        // Read byte and mipmap count
+        auto byte_count = file->ReadAs<uint32_t>();
+        const auto mip_count  = file->ReadAs<uint32_t>();
+
+        // Read bytes
+        m_data.resize(mip_count);
+        for (auto& mip : m_data)
+        {
+            file->Read(&mip);
+        }
+
+        // Read properties
+        file->Read(&m_bits_per_channel);
+        file->Read(&m_width);
+        file->Read(&m_height);
+        file->Read(reinterpret_cast<uint32_t*>(&m_format));
+        file->Read(&m_channel_count);
+        file->Read(&m_flags);
+        SetId(file->ReadAs<uint32_t>());
+        SetResourceFilePath(file->ReadAs<string>());
+
+        return true;
+    }
+
+    uint32_t RHI_Texture::GetChannelCountFromFormat(const RHI_Format format)
+    {
+        switch (format)
+        {
+            case RHI_Format_R8_Unorm:               return 1;
+            case RHI_Format_R16_Uint:               return 1;
+            case RHI_Format_R16_Float:              return 1;
+            case RHI_Format_R32_Uint:               return 1;
+            case RHI_Format_R32_Float:              return 1;
+            case RHI_Format_R8G8_Unorm:             return 2;
+            case RHI_Format_R16G16_Float:           return 2;
+            case RHI_Format_R32G32_Float:           return 2;
+            case RHI_Format_R11G11B10_Float:        return 3;
+            case RHI_Format_R16G16B16A16_Snorm:     return 3;
+            case RHI_Format_R32G32B32_Float:        return 3;
+            case RHI_Format_R8G8B8A8_Unorm:         return 4;
+            case RHI_Format_R10G10B10A2_Unorm:      return 4;
+            case RHI_Format_R16G16B16A16_Float:     return 4;
+            case RHI_Format_R32G32B32A32_Float:     return 4;
+            case RHI_Format_D32_Float:              return 1;
+            case RHI_Format_D32_Float_S8X24_Uint:   return 2;
+            default:                                return 0;
+        }
+    }
+
+    uint32_t RHI_Texture::GetByteCount()
+    {
+        uint32_t byte_count = 0;
+
+        for (auto& mip : m_data)
+        {
+            byte_count += static_cast<uint32_t>(mip.size());
+        }
+
+        return byte_count;
+    }
 }

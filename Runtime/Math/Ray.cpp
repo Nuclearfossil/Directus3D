@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,163 +19,159 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES ==============================
+//= INCLUDES =======
+#include "Spartan.h"
 #include "Ray.h"
-#include <algorithm>
-#include "RayHit.h"
-#include "BoundingBox.h"
-#include "../World/Entity.h"
-#include "../World/Components/Renderable.h"
-#include "../World/Components/Skybox.h"
-//=========================================
+//==================
 
 //= NAMESPACES =====
 using namespace std;
 //==================
 
-namespace Directus::Math
+namespace Spartan::Math
 {
-	Ray::Ray()
-	{
+    Ray::Ray(const Vector3& start, const Vector3& end)
+    {
+        m_start                     = start;
+        m_end                       = end;
+        const Vector3 start_to_end  = (end - start);
+        m_length                    = start_to_end.Length();
+        m_direction                 = start_to_end.Normalized();
+    }
 
-	}
+    float Ray::HitDistance(const BoundingBox& box) const
+    {
+        // If undefined, no hit (infinite distance)
+        if (!box.Defined())
+            return INFINITY;
+        
+        // Check for ray origin being inside the box
+        if (box.IsInside(m_start))
+            return 0.0f;
 
-	Ray::Ray(const Vector3& start, const Vector3& end)
-	{
-		m_start		= start;
-		m_end		= end;
-		m_direction = (end - start).Normalized();
-	}
+        auto dist = INFINITY;
 
-	Ray::~Ray()
-	{
+        // Check for intersecting in the X-direction
+        if (m_start.x < box.GetMin().x && m_direction.x > 0.0f)
+        {
+            const auto x = (box.GetMin().x - m_start.x) / m_direction.x;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.y >= box.GetMin().y && point.y <= box.GetMax().y && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
+                {
+                    dist = x;
+                }
+            }
+        }
+        if (m_start.x > box.GetMax().x && m_direction.x < 0.0f)
+        {
+            const auto x = (box.GetMax().x - m_start.x) / m_direction.x;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.y >= box.GetMin().y && point.y <= box.GetMax().y && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
+                {
+                    dist = x;
+                }
+            }
+        }
 
-	}
+        // Check for intersecting in the Y-direction
+        if (m_start.y < box.GetMin().y && m_direction.y > 0.0f)
+        {
+            const auto x = (box.GetMin().y - m_start.y) / m_direction.y;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
+                {
+                    dist = x;
+                }
+            }
+        }
+        if (m_start.y > box.GetMax().y && m_direction.y < 0.0f)
+        {
+            const auto x = (box.GetMax().y - m_start.y) / m_direction.y;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
+                {
+                    dist = x;
+                }
+            }
+        }
 
-	vector<RayHit> Ray::Trace(Context* context)
-	{
-		// Find all the entities that the ray hits
-		vector<RayHit> hits;
-		const vector<shared_ptr<Entity>>& entities = context->GetSubsystem<World>()->Entities_GetAll();
-		for (const auto& entity : entities)
-		{
-			// Make sure there entity has a mesh and exclude the SkyBox
-			if (!entity->HasComponent<Renderable>() || entity->HasComponent<Skybox>())
-				continue;
+        // Check for intersecting in the Z-direction
+        if (m_start.z < box.GetMin().z && m_direction.z > 0.0f)
+        {
+            const auto x = (box.GetMin().z - m_start.z) / m_direction.z;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.y >= box.GetMin().y && point.y <= box.GetMax().y)
+                {
+                    dist = x;
+                }
+            }
+        }
+        if (m_start.z > box.GetMax().z && m_direction.z < 0.0f)
+        {
+            const auto x = (box.GetMax().z - m_start.z) / m_direction.z;
+            if (x < dist)
+            {
+                const auto point = m_start + x * m_direction;
+                if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.y >= box.GetMin().y && point.y <= box.GetMax().y)
+                {
+                    dist = x;
+                }
+            }
+        }
 
-			// Get bounding box
-			BoundingBox aabb = entity->GetComponent<Renderable>()->Geometry_AABB();
+        return dist;
+    }
 
-			// Compute hit distance
-			float hitDistance = HitDistance(aabb);
+    float Ray::HitDistance(const Vector3& v1, const Vector3& v2, const Vector3& v3, Vector3* out_normal /*= nullptr*/, Vector3* out_bary /*= nullptr*/) const
+    {
+        // Based on Fast, Minimum Storage Ray/Triangle Intersection by Möller & Trumbore
+        // http://www.graphics.cornell.edu/pubs/1997/MT97.pdf
+        // Calculate edge vectors
+        Vector3 edge1(v2 - v1);
+        Vector3 edge2(v3 - v1);
 
-			// Don't store hit data if there was no hit
-			if (hitDistance == INFINITY)
-				continue;
+        // Calculate determinant & check backfacing
+        Vector3 p(m_direction.Cross(edge2));
+        float det = edge1.Dot(p);
 
-			bool inside	= (hitDistance == 0.0f);
-			hits.emplace_back(entity, hitDistance, inside);
-		}
+        if (det >= Helper::EPSILON)
+        {
+            // Calculate u & v parameters and test
+            Vector3 t(m_start - v1);
+            float u = t.Dot(p);
+            if (u >= 0.0f && u <= det)
+            {
+                Vector3 q(t.Cross(edge1));
+                float v = m_direction.Dot(q);
+                if (v >= 0.0f && u + v <= det)
+                {
+                    float distance = edge2.Dot(q) / det;
 
-		// Sort by distance (ascending)
-		sort(hits.begin(), hits.end(), [](const RayHit& a, const RayHit& b)
-		{
-			return a.m_distance < b.m_distance;
-		});
+                    // Discard hits behind the ray
+                    if (distance >= 0.0f)
+                    {
+                        // There is an intersection, so calculate distance & optional normal
+                        if (out_normal)
+                            *out_normal = edge1.Cross(edge2);
+                        if (out_bary)
+                            *out_bary = Vector3(1 - (u / det) - (v / det), u / det, v / det);
 
-		return hits;
-	}
+                        return distance;
+                    }
+                }
+            }
+        }
 
-	float Ray::HitDistance(const BoundingBox& box)
-	{
-		// If undefined, no hit (infinite distance)
-		if (!box.Defined())
-			return INFINITY;
-		
-		// Check for ray origin being inside the box
-		if (box.IsInside(m_start))
-			return 0.0f;
-
-		float dist = INFINITY;
-
-		// Check for intersecting in the X-direction
-		if (m_start.x < box.GetMin().x && m_direction.x > 0.0f)
-		{
-			float x = (box.GetMin().x - m_start.x) / m_direction.x;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.y >= box.GetMin().y && point.y <= box.GetMax().y && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
-				{
-					dist = x;
-				}
-			}
-		}
-		if (m_start.x > box.GetMax().x && m_direction.x < 0.0f)
-		{
-			float x = (box.GetMax().x - m_start.x) / m_direction.x;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.y >= box.GetMin().y && point.y <= box.GetMax().y && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
-				{
-					dist = x;
-				}
-			}
-		}
-
-		// Check for intersecting in the Y-direction
-		if (m_start.y < box.GetMin().y && m_direction.y > 0.0f)
-		{
-			float x = (box.GetMin().y - m_start.y) / m_direction.y;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
-				{
-					dist = x;
-				}
-			}
-		}
-		if (m_start.y > box.GetMax().y && m_direction.y < 0.0f)
-		{
-			float x = (box.GetMax().y - m_start.y) / m_direction.y;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.z >= box.GetMin().z && point.z <= box.GetMax().z)
-				{
-					dist = x;
-				}
-			}
-		}
-
-		// Check for intersecting in the Z-direction
-		if (m_start.z < box.GetMin().z && m_direction.z > 0.0f)
-		{
-			float x = (box.GetMin().z - m_start.z) / m_direction.z;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.y >= box.GetMin().y && point.y <= box.GetMax().y)
-				{
-					dist = x;
-				}
-			}
-		}
-		if (m_start.z > box.GetMax().z && m_direction.z < 0.0f)
-		{
-			float x = (box.GetMax().z - m_start.z) / m_direction.z;
-			if (x < dist)
-			{
-				Vector3 point = m_start + x * m_direction;
-				if (point.x >= box.GetMin().x && point.x <= box.GetMax().x && point.y >= box.GetMin().y && point.y <= box.GetMax().y)
-				{
-					dist = x;
-				}
-			}
-		}
-
-		return dist;
-	}
+        return Helper::INFINITY_;
+    }  
 }

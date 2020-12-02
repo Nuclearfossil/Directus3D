@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,45 +21,66 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==========
-#include "EngineDefs.h"
+//= INCLUDES ===================
 #include <memory>
-//=====================
+#include "Spartan_Definitions.h"
+//==============================
 
-namespace Directus
+namespace Spartan
 {
-	class Context;
+    class Context;
+    class Timer;
 
-	enum Engine_Mode : int
-	{
-		Engine_Tick		= 1UL << 0,	// Should the engine tick?
-		Engine_Physics	= 1UL << 1, // Should the physics tick?	
-		Engine_Game		= 1UL << 2,	// Is the engine running in game or editor mode?
-	};
+    struct WindowData
+    {
+        void* handle                    = nullptr;
+        void* instance                  = nullptr;
+        uint32_t message                = 0;
+        float width                     = 0;
+        float height                    = 0;
+        uint32_t monitor_width          = 0;
+        uint32_t monitor_height         = 0;
+        uint32_t monitor_width_virtual  = 0; // multi-monitor setup
+        uint32_t monitor_height_virtual = 0; // multi-monitor setup
+        uint64_t wparam                 = 0;
+        int64_t lparam                  = 0;
+        bool minimise                   = false;
+        bool maximise                   = false;
+    };
 
-	class Timer;
+    enum Engine_Mode : uint32_t
+    {
+        Engine_Physics  = 1UL << 0, // Should the physics tick ?
+        Engine_Game     = 1UL << 1, // Is the engine running in game or editor mode ?
+    };
 
-	class ENGINE_CLASS Engine
-	{
-	public:
-		Engine(std::shared_ptr<Context> context);
-		~Engine();
+    class SPARTAN_CLASS Engine
+    {
+    public:
+        Engine(const WindowData& window_data);
+        ~Engine();
 
-		// Performs a simulation cycle
-		void Tick();
+        // Performs a simulation cycle
+        void Tick() const;
 
-		//  Flag helpers
-		static unsigned int EngineMode_GetAll()				{ return m_flags; }
-		static void EngineMode_SetAll(unsigned int flags)	{ m_flags = flags; }
-		static void EngineMode_Enable(Engine_Mode flag)		{ m_flags |= flag; }
-		static void EngineMode_Disable(Engine_Mode flag)	{ m_flags &= ~flag; }
-		static void EngineMode_Toggle(Engine_Mode flag)		{ m_flags = !EngineMode_IsSet(flag) ? m_flags | flag : m_flags & ~flag;}
-		static bool EngineMode_IsSet(Engine_Mode flag)		{ return m_flags & flag; }
+        //  Flags
+        auto EngineMode_GetAll()                        const { return m_flags; }
+        void EngineMode_SetAll(const uint32_t flags)          { m_flags = flags; }
+        void EngineMode_Enable(const Engine_Mode flag)        { m_flags |= flag; }
+        void EngineMode_Disable(const Engine_Mode flag)       { m_flags &= ~flag; }
+        void EngineMode_Toggle(const Engine_Mode flag)        { m_flags = !EngineMode_IsSet(flag) ? m_flags | flag : m_flags & ~flag;}
+        bool EngineMode_IsSet(const Engine_Mode flag)   const { return m_flags & flag; }
 
-		Context* GetContext() { return m_context.get(); }
+        // Window
+        const WindowData& GetWindowData() const { return m_window_data; }
+        void SetWindowData(WindowData& window_data);
 
-	private:
-		static unsigned int m_flags;
-		std::shared_ptr<Context> m_context;
-	};
+        auto GetContext() const { return m_context.get(); }
+
+    private:
+        WindowData m_window_data;
+        uint32_t m_flags    = 0;
+        Timer* m_timer      = nullptr;
+        std::shared_ptr<Context> m_context;
+    };
 }

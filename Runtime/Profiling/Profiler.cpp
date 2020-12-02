@@ -1,5 +1,5 @@
 ﻿/*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,216 +20,376 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 //= INCLUDES =========================
+#include "Spartan.h"
 #include "Profiler.h"
-#include "../Core/Timer.h"
-#include "../Core/Settings.h"
-#include "../Core/EventSystem.h"
-#include "../World/World.h"
 #include "../Rendering/Renderer.h"
-#include <iomanip>
-#include <sstream>
-#include "../RHI/RHI_Device.h"
-#include "../Core/Variant.h"
 #include "../Resource/ResourceCache.h"
+#include "../RHI/RHI_Device.h"
+#include "../RHI/RHI_CommandList.h"
+#include "../RHI/RHI_Implementation.h"
 //====================================
 
-//= NAMESPACES =============
+//= NAMESPACES =====
 using namespace std;
-using namespace std::chrono;
-//==========================
+//==================
 
-namespace Directus
+namespace Spartan
 {
-	Profiler::Profiler(Context* context) : ISubsystem(context)
-	{
-		m_metrics					= NOT_ASSIGNED;
-		m_scene						= nullptr;
-		m_timer						= nullptr;
-		m_resourceManager			= nullptr;
-		m_gpuProfiling				= false; // expensive
-		m_cpuProfiling				= false; // cheap
-		m_profilingFrequencySec		= 0.0f;
-		m_profilingLastUpdateTime	= 0;
-		m_fps						= 0.0f;
-		m_timePassed				= 0.0f;
-		m_frameCount				= 0;
-		m_profilingFrequencySec		= 0.35f;
-		m_profilingLastUpdateTime	= m_profilingFrequencySec;
+    Profiler::Profiler(Context* context) : ISubsystem(context)
+    {
+        m_time_blocks_read.reserve(m_time_block_capacity);
+        m_time_blocks_read.resize(m_time_block_capacity);
+        m_time_blocks_write.reserve(m_time_block_capacity);
+        m_time_blocks_write.resize(m_time_block_capacity);
+    }
 
-		// Subscribe to events
-		SUBSCRIBE_TO_EVENT(Event_Frame_Start, EVENT_HANDLER(OnFrameStart));
-		SUBSCRIBE_TO_EVENT(Event_Frame_End, EVENT_HANDLER(OnFrameEnd));
-	}
+    Profiler::~Profiler()
+    {
+        if (m_profile) OnFrameEnd();
+        m_time_blocks_write.clear();
+        m_time_blocks_read.clear();
+        ClearRhiMetrics();
+    }
 
-	bool Profiler::Initialize()
-	{
-		m_scene				= m_context->GetSubsystem<World>().get();
-		m_timer				= m_context->GetSubsystem<Timer>().get();
-		m_resourceManager	= m_context->GetSubsystem<ResourceCache>().get();
-		m_renderer			= m_context->GetSubsystem<Renderer>().get();
-		return true;
-	}
+    bool Profiler::Initialize()
+    {
+        m_resource_manager    = m_context->GetSubsystem<ResourceCache>();
+        m_renderer            = m_context->GetSubsystem<Renderer>();
+        m_timer             = m_context->GetSubsystem<Timer>();
 
-	void Profiler::TimeBlockStart_CPU(const char* funcName)
-	{
-		if (!m_cpuProfiling || !m_shouldUpdate)
-			return;
+        return true;
+    }
 
-		m_timeBlocks_cpu[funcName].start = high_resolution_clock::now();
-	}
+    void Profiler::Tick(float delta_time)
+    {
+        if (!m_renderer)
+            return;
 
-	void Profiler::TimeBlockEnd_CPU(const char* funcName)
-	{
-		if (!m_cpuProfiling || !m_shouldUpdate)
-			return;
+        RHI_Device* rhi_device = m_renderer->GetRhiDevice().get();
+        if (!rhi_device || !rhi_device->GetContextRhi()->profiler)
+            return;
 
-		auto timeBlock = &m_timeBlocks_cpu[funcName];
+        if (m_increase_capacity)
+        {
+            OnFrameEnd();
 
-		timeBlock->end				= high_resolution_clock::now();
-		duration<double, milli> ms	= timeBlock->end - timeBlock->start;
-		timeBlock->duration			= (float)ms.count();
-	}
+            const uint32_t new_size = m_time_block_count + 100;
+            m_time_blocks_read.reserve(new_size);
+            m_time_blocks_read.resize(new_size);
+            m_time_blocks_write.reserve(new_size);
+            m_time_blocks_write.resize(new_size);
+            LOG_WARNING("Time block list has grown to fit %d commands. Consider making the capacity larger to avoid re-allocations.", m_time_block_count + 1);
+            m_increase_capacity = false;
+            m_profile = true;
+        }
+        else
+        {
+            if (m_profile)
+            {
+                OnFrameEnd();
+            }
+        }
 
-	void Profiler::TimeBlockStart_GPU(const char* funcName)
-	{
-		if (!m_gpuProfiling || !m_shouldUpdate)
-			return;
+        // Compute fps
+        ComputeFps(delta_time);
 
-		auto timeBlock = &m_timeBlocks_gpu[funcName];
+        // Check whether we should profile or not
+        m_time_since_profiling_sec += delta_time;
+        if (m_time_since_profiling_sec >= m_profiling_interval_sec)
+        {
+            m_time_since_profiling_sec  = 0.0f;
+            m_profile                   = true;
+        }
+        else if (m_profile)
+        {
+            m_profile = false;
+        }
 
-		if (!timeBlock->initialized)
-		{
-			m_renderer->GetRHIDevice()->Profiling_CreateQuery(&timeBlock->query,		Query_Timestamp_Disjoint);
-			m_renderer->GetRHIDevice()->Profiling_CreateQuery(&timeBlock->time_start,	Query_Timestamp);
-			m_renderer->GetRHIDevice()->Profiling_CreateQuery(&timeBlock->time_end,		Query_Timestamp);
-			timeBlock->initialized = true;
-		}
+        // Updating every m_profiling_interval_sec
+        if (m_profile)
+        {
+            AcquireGpuData();
 
-		m_renderer->GetRHIDevice()->Profiling_QueryStart(timeBlock->query);
-		m_renderer->GetRHIDevice()->Profiling_GetTimeStamp(timeBlock->time_start);
-		timeBlock->started = true;
-	}
+            // Create a string version of the rhi metrics
+            if (m_renderer->GetOptions() & Render_Debug_PerformanceMetrics)
+            {
+                UpdateRhiMetricsString();
+            }
+        }
 
-	void Profiler::TimeBlockEnd_GPU(const char* funcName)
-	{
-		if (!m_gpuProfiling || !m_shouldUpdate)
-			return;
+        ClearRhiMetrics();
+    }
 
-		auto timeBlock = &m_timeBlocks_gpu[funcName];
+    void Profiler::OnFrameEnd()
+    {
+        // Clear time blocks
+        {
+            uint32_t pass_index_gpu = 0;
 
-		m_renderer->GetRHIDevice()->Profiling_GetTimeStamp(timeBlock->time_end);
-		m_renderer->GetRHIDevice()->Profiling_QueryEnd(timeBlock->query);
-	}
+            for (uint32_t i = 0; i < m_time_block_count; i++)
+            {
+                TimeBlock& time_block = m_time_blocks_write[i];
 
-	void Profiler::TimeBlockStart_Multi(const char* funcName)
-	{
-		TimeBlockStart_CPU(funcName);
-		TimeBlockStart_GPU(funcName);
-	}
+                if (time_block.IsComplete())
+                {
+                    // Must not happen when TimeBlockEnd() ends as D3D11 waits
+                    // too much for the results to be ready, which increases CPU time.
+                    time_block.ComputeDuration(pass_index_gpu);
+                    if (time_block.GetType() == TimeBlock_Gpu)
+                    {
+                        pass_index_gpu += 2;
+                    }
 
-	void Profiler::TimeBlockEnd_Multi(const char* funcName)
-	{
-		TimeBlockEnd_CPU(funcName);
-		TimeBlockEnd_GPU(funcName);
-	}
+                    m_time_blocks_read[i] = time_block;
+                }
+                else
+                {
+                    LOG_WARNING("TimeBlockEnd() was not called for time block \"%s\"", time_block.GetName());
+                }
+                
+                time_block.Reset();
+            }
 
-	void Profiler::OnFrameStart()
-	{
-		// Get delta time
-		m_frameTimeMs	= m_timer->GetDeltaTimeMs();
-		m_frameTimeSec	= m_timer->GetDeltaTimeSec();
+            m_time_block_count = 0;
+        }
 
-		// Compute FPS
-		ComputeFPS(m_frameTimeSec);
-		// Get GPU render time
-		m_cpuTime = GetTimeBlockMs_CPU("Directus::Renderer::Render");
-		// Get CPU render time
-		m_gpuTime = GetTimeBlockMs_GPU("Directus::Renderer::Render");
+        // Detect stutters
+        float frames_to_accumulate  = 5.0f;
+        float delta_feedback        = 1.0f / frames_to_accumulate;
+        m_is_stuttering_cpu         = m_time_cpu_last > (m_time_cpu_avg + m_stutter_delta_ms);
+        m_is_stuttering_gpu         = m_time_gpu_last > (m_time_gpu_avg + m_stutter_delta_ms);
 
-		// Below this point, update every m_profilingFrequencyMs
-		m_profilingLastUpdateTime += m_frameTimeSec;
-		if (m_profilingLastUpdateTime >= m_profilingFrequencySec)
-		{
-			UpdateMetrics(m_fps);
-			m_shouldUpdate				= true;
-			m_profilingLastUpdateTime	= 0.0f;
-		}
-	}
+        // Compute cpu and gpu times
+        {
+            frames_to_accumulate    = 20.0f;
+            delta_feedback          = 1.0f / frames_to_accumulate;
+            m_time_cpu_last         = 0.0f;
+            m_time_gpu_last         = 0.0f;
 
-	void Profiler::OnFrameEnd()
-	{
-		if (!m_shouldUpdate)
-			return;
+            for (const TimeBlock& time_block : m_time_blocks_read)
+            {
+                if (!time_block.IsComplete())
+                    continue;
 
-		for (auto& entry : m_timeBlocks_gpu)
-		{
-			auto& timeBlock = entry.second;
+                if (!time_block.GetParent() && time_block.GetType() == TimeBlock_Cpu)
+                {
+                    m_time_cpu_last += time_block.GetDuration();
+                }
 
-			if (timeBlock.started)
-			{
-				timeBlock.duration = m_renderer->GetRHIDevice()->Profiling_GetDuration(timeBlock.query, timeBlock.time_start, timeBlock.time_end);
-			}
-			timeBlock.started = false;
-		}
+                if (!time_block.GetParent() && time_block.GetType() == TimeBlock_Gpu)
+                {
+                    m_time_gpu_last += time_block.GetDuration();
+                }
+            }
 
-		m_shouldUpdate = false;
-	}
+            // CPU
+            m_time_cpu_avg = m_time_cpu_avg * (1.0f - delta_feedback) + m_time_cpu_last * delta_feedback;
+            m_time_cpu_min = Math::Helper::Min(m_time_cpu_min, m_time_cpu_last);
+            m_time_cpu_max = Math::Helper::Max(m_time_cpu_max, m_time_cpu_last);
 
-	void Profiler::UpdateMetrics(float fps)
-	{
-		int textures	= m_resourceManager->GetResourceCountByType(Resource_Texture);
-		int materials	= m_resourceManager->GetResourceCountByType(Resource_Material);
-		int shaders		= m_resourceManager->GetResourceCountByType(Resource_Shader);
+            // GPU
+            m_time_gpu_avg = m_time_gpu_avg * (1.0f - delta_feedback) + m_time_gpu_last * delta_feedback;
+            m_time_gpu_min = Math::Helper::Min(m_time_gpu_min, m_time_gpu_last);
+            m_time_gpu_max = Math::Helper::Max(m_time_gpu_max, m_time_gpu_last);
 
-		m_metrics =
-			// Performance
-			"FPS:\t\t\t\t\t\t\t"	+ to_string_precision(fps, 2) + "\n"
-			"Frame time:\t\t\t\t\t" + to_string_precision(m_frameTimeMs, 2) + " ms\n"
-			"CPU time:\t\t\t\t\t\t" + to_string_precision(m_cpuTime, 2) + " ms\n"
-			"GPU time:\t\t\t\t\t\t" + to_string_precision(m_gpuTime, 2) + " ms\n"
-			"GPU:\t\t\t\t\t\t\t"	+ Settings::Get().Gpu_GetName() + "\n"
-			"VRAM:\t\t\t\t\t\t\t"	+ to_string(Settings::Get().Gpu_GetMemory()) + " MB\n"
+            // Frame
+            m_time_frame_last   = static_cast<float>(m_timer->GetDeltaTimeMs());
+            m_time_frame_avg    = m_time_frame_avg * (1.0f - delta_feedback) + m_time_frame_last * delta_feedback;
+            m_time_frame_min    = Math::Helper::Min(m_time_frame_min, m_time_frame_last);
+            m_time_frame_max    = Math::Helper::Max(m_time_frame_max, m_time_frame_last);
+        }
+    }
 
-			// Renderer
-			"Resolution:\t\t\t\t\t"				+ to_string((int)m_renderer->GetResolution().x) + "x" + to_string((int)m_renderer->GetResolution().y) + "\n"
-			"Meshes rendered:\t\t\t\t"			+ to_string(m_rendererMeshesRendered) + "\n"
-			"Textures:\t\t\t\t\t\t"				+ to_string(textures) + "\n"
-			"Materials:\t\t\t\t\t\t"			+ to_string(materials) + "\n"
-			"Shaders:\t\t\t\t\t\t"				+ to_string(shaders) + "\n"
+    void Profiler::TimeBlockStart(const char* func_name, TimeBlock_Type type, RHI_CommandList* cmd_list /*= nullptr*/)
+    {
+        if (!m_profile)
+            return;
 
-			// RHI
-			"RHI Draw calls:\t\t\t\t\t"			+ to_string(m_rhiDrawCalls) + "\n"
-			"RHI Index buffer bindings:\t\t"	+ to_string(m_rhiBindingsBufferIndex) + "\n"
-			"RHI Vertex buffer bindings:\t"		+ to_string(m_rhiBindingsBufferVertex) + "\n"
-			"RHI Constant buffer bindings:\t"	+ to_string(m_rhiBindingsBufferConstant) + "\n"
-			"RHI Sampler bindings:\t\t\t"		+ to_string(m_rhiBindingsSampler) + "\n"
-			"RHI Texture bindings:\t\t\t"		+ to_string(m_rhiBindingsTexture) + "\n"
-			"RHI Vertex Shader bindings:\t"		+ to_string(m_rhiBindingsVertexShader) + "\n"
-			"RHI Pixel Shader bindings:\t\t"	+ to_string(m_rhiBindingsPixelShader) + "\n"
-			"RHI Render Target bindings:\t"		+ to_string(m_rhiBindingsRenderTarget) + "\n";
-	}
+        const bool can_profile_cpu = (type == TimeBlock_Cpu) && m_profile_cpu_enabled;
+        const bool can_profile_gpu = (type == TimeBlock_Gpu) && m_profile_gpu_enabled;
 
-	void Profiler::ComputeFPS(float deltaTime)
-	{
-		// update counters
-		m_frameCount++;
-		m_timePassed += deltaTime;
+        if (!can_profile_cpu && !can_profile_gpu)
+            return;
 
-		if (m_timePassed >= 1.0f)
-		{
-			// compute fps
-			m_fps = (float)m_frameCount / (m_timePassed / 1.0f);
+        // Last incomplete block of the same type, is the parent
+        TimeBlock* time_block_parent = GetLastIncompleteTimeBlock(type);
 
-			// reset counters
-			m_frameCount = 0;
-			m_timePassed = 0;
-		}
-	}
+        if (TimeBlock* time_block = GetNewTimeBlock())
+        {
+            time_block->Begin(func_name, type, time_block_parent, cmd_list, m_renderer->GetRhiDevice());
+        }
+    }
 
-	string Profiler::to_string_precision(float value, int decimals)
-	{
-		ostringstream out;
-		out << fixed << setprecision(decimals) << value;
-		return out.str();
-	}
+    void Profiler::TimeBlockEnd()
+    {
+        // If the capacity 
+        if (m_increase_capacity)
+            return;
+
+        if (TimeBlock* time_block = GetLastIncompleteTimeBlock())
+        {
+            time_block->End();
+        }
+    }
+
+    void Profiler::ResetMetrics()
+    {
+        m_time_frame_avg    = 0.0f;
+        m_time_frame_min    = std::numeric_limits<float>::max();
+        m_time_frame_max    = std::numeric_limits<float>::lowest();
+        m_time_frame_last   = 0.0f;
+        m_time_cpu_avg      = 0.0f;
+        m_time_cpu_min      = std::numeric_limits<float>::max();
+        m_time_cpu_max      = std::numeric_limits<float>::lowest();
+        m_time_cpu_last     = 0.0f;
+        m_time_gpu_avg      = 0.0f;
+        m_time_gpu_min      = std::numeric_limits<float>::max();
+        m_time_gpu_max      = std::numeric_limits<float>::lowest();
+        m_time_gpu_last     = 0.0f;
+    }
+
+    TimeBlock* Profiler::GetNewTimeBlock()
+    {
+        // Increase capacity if needed
+        if (m_time_block_count >= static_cast<uint32_t>(m_time_blocks_write.size()))
+        {
+            m_increase_capacity = true;
+            return nullptr;
+        }
+
+        // Return a time block
+        return &m_time_blocks_write[m_time_block_count++];
+    }
+
+    TimeBlock* Profiler::GetLastIncompleteTimeBlock(TimeBlock_Type type /*= TimeBlock_Undefined*/)
+    {
+        for (int i = m_time_block_count - 1; i >= 0; i--)
+        {
+            TimeBlock& time_block = m_time_blocks_write[i];
+
+            if (type == time_block.GetType() || type == TimeBlock_Undefined)
+            {
+                if (!time_block.IsComplete())
+                    return &time_block;
+            }
+        }
+
+        return nullptr;
+    }
+
+    void Profiler::ComputeFps(const float delta_time)
+    {
+        m_frames_since_last_fps_computation++;
+        m_time_passed += delta_time;
+        m_fps = static_cast<float>(m_frames_since_last_fps_computation) / (m_time_passed / 1.0f);
+
+        if (m_time_passed >= 1.0f)
+        {
+            m_frames_since_last_fps_computation = 0;
+            m_time_passed = 0;
+        }
+    }
+
+    void Profiler::AcquireGpuData()
+    {
+        RHI_Device* rhi_device = m_renderer->GetRhiDevice().get();
+        if (const PhysicalDevice* physical_device = rhi_device->GetPrimaryPhysicalDevice())
+        {
+            m_gpu_name              = physical_device->GetName();
+            m_gpu_memory_used       = RHI_CommandList::Gpu_GetMemoryUsed(rhi_device);
+            m_gpu_memory_available  = RHI_CommandList::Gpu_GetMemory(rhi_device);
+            m_gpu_driver            = physical_device->GetDriverVersion();
+            m_gpu_api               = physical_device->GetApiVersion();
+        }
+    }
+
+    void Profiler::UpdateRhiMetricsString()
+    {
+        const auto texture_count    = m_resource_manager->GetResourceCount(ResourceType::Texture) + m_resource_manager->GetResourceCount(ResourceType::Texture2d) + m_resource_manager->GetResourceCount(ResourceType::TextureCube);
+        const auto material_count   = m_resource_manager->GetResourceCount(ResourceType::Material);
+
+        static const char* text =
+            // Times
+            "FPS:\t\t%.2f\n"
+            "Frame:\t%d\n"
+            "Time:\t%.2f ms\n"
+            "\n"
+            // Detailed times
+            "\t\tavg\t\tmin\t\tmax\t\tlast\n"
+            "Total:\t%06.2f\t%06.2f\t%06.2f\t%06.2f ms\n"
+            "CPU:\t\t%06.2f\t%06.2f\t%06.2f\t%06.2f ms\n"
+            "GPU:\t%06.2f\t%06.2f\t%06.2f\t%06.2f ms\n"
+            "\n"
+            // GPU
+            "API:\t\t%s\n"
+            "GPU:\t%s\n"
+            "VRAM:\t%d/%d MB\n"
+            "Driver:\t%s\n"
+            "\n"
+            // Renderer
+            "Resolution:\t\t%dx%d\n"
+            "Meshes rendered:\t%d\n"
+            "Textures:\t\t\t%d\n"
+            "Materials:\t\t%d\n"
+            "\n"
+            // RHI
+            "Draw:\t\t\t%d\n"
+            "Dispatch:\t\t\t%d\n"
+            "Index buffer:\t\t%d\n"
+            "Vertex buffer:\t\t%d\n"
+            "Constant buffer:\t%d\n"
+            "Sampler:\t\t\t%d\n"
+            "Texture sampled:\t%d\n"
+            "Texture storage:\t%d\n"
+            "Shader vertex:\t%d\n"
+            "Shader pixel:\t\t%d\n"
+            "Shader compute:\t%d\n"
+            "Render target:\t%d\n"
+            "Pipeline:\t\t\t%d\n"
+            "Descriptor set:\t%d\n"
+            "Pipeline barrier:\t%d";
+
+        static char buffer[2048];
+        sprintf_s
+        (
+            buffer, text,
+
+            // Performance
+            m_fps,
+            m_renderer->GetFrameNum(),
+            m_time_frame_last,
+            m_time_frame_avg,   m_time_frame_min,   m_time_frame_max,   m_time_frame_last,
+            m_time_cpu_avg,     m_time_cpu_min,     m_time_cpu_max,     m_time_cpu_last,
+            m_time_gpu_avg,     m_time_gpu_min,     m_time_gpu_max,     m_time_gpu_last,
+            m_gpu_api.c_str(),
+            m_gpu_name.c_str(),
+            m_gpu_memory_used, m_gpu_memory_available,
+            m_gpu_driver.c_str(),
+
+            // Renderer
+            static_cast<int>(m_renderer->GetResolution().x), static_cast<int>(m_renderer->GetResolution().y),
+            m_renderer_meshes_rendered,
+            texture_count,
+            material_count,
+
+            // RHI
+            m_rhi_draw,
+            m_rhi_dispatch,
+            m_rhi_bindings_buffer_index,
+            m_rhi_bindings_buffer_vertex,
+            m_rhi_bindings_buffer_constant,
+            m_rhi_bindings_sampler,
+            m_rhi_bindings_texture_sampled,
+            m_rhi_bindings_texture_storage,
+            m_rhi_bindings_shader_vertex,
+            m_rhi_bindings_shader_pixel,
+            m_rhi_bindings_shader_compute,
+            m_rhi_bindings_render_target,
+            m_rhi_bindings_pipeline,
+            m_rhi_bindings_descriptor_set,
+            m_rhi_pipeline_barriers
+        );
+
+        m_metrics = string(buffer);
+    }
 }

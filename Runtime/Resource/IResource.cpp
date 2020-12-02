@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,38 +19,45 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= INCLUDES =====================================
+//= INCLUDES ============================
+#include "Spartan.h"
 #include "IResource.h"
-#include "../Rendering/Deferred/ShaderVariation.h"
-#include "../Rendering/Animation.h"
 #include "../Audio/AudioClip.h"
-#include "../Rendering/Mesh.h"
 #include "../Rendering/Model.h"
 #include "../Rendering/Font/Font.h"
-//================================================
+#include "../Rendering/Animation.h"
+#include "../RHI/RHI_Texture.h"
+#include "../RHI/RHI_Texture2D.h"
+#include "../RHI/RHI_TextureCube.h"
+//=======================================
 
 //= NAMESPACES ==========
 using namespace std;
-using namespace Directus;
+using namespace Spartan;
 //=======================
 
-template <typename T>
-Resource_Type IResource::DeduceResourceType() { return Resource_Unknown; }
-#define INSTANTIATE_ToResourceType(T, enumT) template<> ENGINE_CLASS Resource_Type IResource::DeduceResourceType<T>() { return enumT; }
-// Explicit template instantiation
-INSTANTIATE_ToResourceType(RHI_Texture,		Resource_Texture)
-INSTANTIATE_ToResourceType(AudioClip,		Resource_Audio)
-INSTANTIATE_ToResourceType(Material,		Resource_Material)
-INSTANTIATE_ToResourceType(ShaderVariation, Resource_Shader)
-INSTANTIATE_ToResourceType(Mesh,			Resource_Mesh)
-INSTANTIATE_ToResourceType(Model,			Resource_Model)
-INSTANTIATE_ToResourceType(Animation,		Resource_Animation)
-INSTANTIATE_ToResourceType(Font,			Resource_Font)
-
-IResource::IResource(Context* context, Resource_Type type)
+IResource::IResource(Context* context, const ResourceType type)
 {
-	m_context			= context;
-	m_resourceType		= type;
-	m_resourceID		= GENERATE_GUID;
-	m_loadState			= LoadState_Idle;
+    m_context        = context;
+    m_resource_type    = type;
+    m_load_state    = Idle;
 }
+
+template <typename T>
+inline constexpr ResourceType IResource::TypeToEnum() { return ResourceType::Unknown; }
+
+template<typename T>
+inline constexpr void validate_resource_type() { static_assert(std::is_base_of<IResource, T>::value, "Provided type does not implement IResource"); }
+
+// Explicit template instantiation
+#define INSTANTIATE_TO_RESOURCE_TYPE(T, enumT) template<> SPARTAN_CLASS ResourceType IResource::TypeToEnum<T>() { validate_resource_type<T>(); return enumT; }
+
+// To add a new resource to the engine, simply register it here
+INSTANTIATE_TO_RESOURCE_TYPE(RHI_Texture,        ResourceType::Texture)
+INSTANTIATE_TO_RESOURCE_TYPE(RHI_Texture2D,        ResourceType::Texture2d)
+INSTANTIATE_TO_RESOURCE_TYPE(RHI_TextureCube,    ResourceType::TextureCube)
+INSTANTIATE_TO_RESOURCE_TYPE(AudioClip,            ResourceType::Audio)
+INSTANTIATE_TO_RESOURCE_TYPE(Material,            ResourceType::Material)
+INSTANTIATE_TO_RESOURCE_TYPE(Model,                ResourceType::Model)
+INSTANTIATE_TO_RESOURCE_TYPE(Animation,            ResourceType::Animation)
+INSTANTIATE_TO_RESOURCE_TYPE(Font,                ResourceType::Font)

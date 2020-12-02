@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,32 +21,32 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES =====================
-#include "../../Core/EngineDefs.h"
-#include <vector>
-#include <map>
-//================================
+//= INCLUDES ==============================
+#include <string>
+#include "../../Core/Spartan_Definitions.h"
+//=========================================
 
-struct FT_FaceRec_;
+//= FORWARD DECLARATIONS =
+struct FT_LibraryRec_;
+struct FT_StrokerRec_;
+//========================
 
-namespace Directus
+namespace Spartan
 {
-	class Context;
-	struct Glyph;
+    class Context;
+    class Font;
 
-	class ENGINE_CLASS FontImporter
-	{
-	public:
-		FontImporter(Context* context);
-		~FontImporter();
+    class SPARTAN_CLASS FontImporter
+    {
+    public:
+        FontImporter(Context* context);
+        ~FontImporter();
 
-		bool LoadFromFile(const std::string& filePath, int fontSize, std::vector<std::byte>& atlasBuffer, unsigned int& atlasWidth, unsigned int& atlasHeight, std::map<unsigned int, Glyph>& characterInfo);
+        bool LoadFromFile(Font* font, const std::string& file_path);
 
-	private:
-		void ComputeAtlasTextureDimensions(FT_FaceRec_* face, unsigned int& atlasWidth, unsigned int& atlasHeight, unsigned int& rowHeight);
-		int GetCharacterMaxHeight(FT_FaceRec_* face);
-		bool HandleError(int errorCode);
-
-		Context* m_context;
-	};
+    private:
+        Context* m_context            = nullptr;
+        FT_LibraryRec_* m_library    = nullptr;
+        FT_StrokerRec_* m_stroker   = nullptr;
+    };
 }

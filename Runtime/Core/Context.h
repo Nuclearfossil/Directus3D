@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,71 +21,108 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ==============
-#include <vector>
-#include "EngineDefs.h"
+//= INCLUDES ===================
 #include "ISubsystem.h"
 #include "../Logging/Log.h"
-//=========================
+#include "Spartan_Definitions.h"
+//==============================
 
-namespace Directus
+namespace Spartan
 {
-	#define ValidateSubsystemType(T) static_assert(std::is_base_of<ISubsystem, T>::value, "Provided type does not implement ISubystem")
+    class Engine;
 
-	class ENGINE_CLASS Context
-	{
-	public:
-		Context() {}
-		~Context() { m_subsystems.clear(); }
+    enum class TickType
+    {
+        Variable,
+        Smoothed
+    };
 
-		// Register a subsystem
-		template <class T>
-		void RegisterSubsystem()
-		{
-			ValidateSubsystemType(T);
-			m_subsystems.emplace_back(std::make_shared<T>(this));
-		}
+    struct _subystem
+    {
+        _subystem(const std::shared_ptr<ISubsystem>& subsystem, TickType tick_group)
+        {
+            ptr = subsystem;
+            this->tick_group = tick_group;
+        }
 
-		// Initialize subsystems
-		bool Initialize()
-		{
-			bool result = true;
-			for (const auto& subsystem : m_subsystems)
-			{
-				if (!subsystem->Initialize())
-				{
-					LOGF_ERROR("Failed to initialize %s", typeid(*subsystem).name());
-					result = false;
-				}
-			}
+        std::shared_ptr<ISubsystem> ptr;
+        TickType tick_group;
+    };
 
-			return result;
-		}
+    class SPARTAN_CLASS Context
+    {
+    public:
+        Context() = default;
 
-		// Tick subsystems
-		void Tick()
-		{
-			for (const auto& subsystem : m_subsystems)
-			{
-				subsystem->Tick();
-			}
-		}
+        ~Context()
+        {
+            // Loop in reverse registration order to avoid dependency conflicts
+            for (size_t i = m_subsystems.size() - 1; i > 0; i--)
+            {
+                m_subsystems[i].ptr.reset();
+            }
 
-		// Get a subsystem
-		template <class T> 
-		std::shared_ptr<T> GetSubsystem()
-		{
-			ValidateSubsystemType(T);
-			for (const auto& subsystem : m_subsystems)
-			{
-				if (typeid(T) == typeid(*subsystem))
-					return std::static_pointer_cast<T>(subsystem);
-			}
+            m_subsystems.clear();
+        }
 
-			return nullptr;
-		}
+        // Register a subsystem
+        template <class T>
+        void RegisterSubsystem(TickType tick_group = TickType::Variable)
+        {
+            validate_subsystem_type<T>();
 
-	private:
-		std::vector<std::shared_ptr<ISubsystem>> m_subsystems;
-	};
+            m_subsystems.emplace_back(std::make_shared<T>(this), tick_group);
+        }
+
+        // Initialize subsystems
+        bool Initialize()
+        {
+            auto result = true;
+            for (const auto& subsystem : m_subsystems)
+            {
+                if (!subsystem.ptr->Initialize())
+                {
+                    LOG_ERROR("Failed to initialize %s", typeid(*subsystem.ptr).name());
+                    result = false;
+                }
+            }
+
+            return result;
+        }
+
+        // Tick
+        void Tick(TickType tick_group, float delta_time = 0.0f)
+        {
+            for (const auto& subsystem : m_subsystems)
+            {
+                if (subsystem.tick_group != tick_group)
+                    continue;
+
+                subsystem.ptr->Tick(delta_time);
+            }
+        }
+
+        // Get a subsystem
+        template <class T> 
+        T* GetSubsystem() const
+        {
+            validate_subsystem_type<T>();
+
+            for (const auto& subsystem : m_subsystems)
+            {
+                if (subsystem.ptr)
+                {
+                    if (typeid(T) == typeid(*subsystem.ptr))
+                        return static_cast<T*>(subsystem.ptr.get());
+                }
+            }
+
+            return nullptr;
+        }
+
+        Engine* m_engine = nullptr;
+
+    private:
+        std::vector<_subystem> m_subsystems;
+    };
 }

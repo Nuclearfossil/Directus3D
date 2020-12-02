@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,265 +19,274 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-#pragma once
-
 //= INCLUDES =================================
+#include "Spartan.h"
 #include "TransformHandle.h"
-#include "..\Model.h"
-#include "..\Renderer.h"
-#include "..\Utilities\Geometry.h"
-#include "..\..\Logging\Log.h"
-#include "..\..\Input\Input.h"
-#include "..\..\World\Entity.h"
-#include "..\..\World\Components\Camera.h"
-#include "..\..\World\Components\Transform.h"
-#include "..\..\Core\Context.h"
-#include "..\..\Core\Settings.h"
-#include "..\..\World\Components\Renderable.h"
+#include "../Model.h"
+#include "../Renderer.h"
+#include "../../Utilities/Geometry.h"
+#include "../../Input/Input.h"
+#include "../../World/Entity.h"
+#include "../../World/Components/Camera.h"
+#include "../../World/Components/Transform.h"
+#include "../../World/Components/Renderable.h"
+#include "../../RHI/RHI_Vertex.h"
 //============================================
 
 //=============================
 using namespace std;
-using namespace Directus::Math;
+using namespace Spartan::Math;
 //=============================
 
-namespace Directus
+namespace Spartan
 {
-	void TransformHandleAxis::UpdateInput(TransformHandle_Type type, Transform* transform, Input* input)
-	{
-		// First press
-		if (isHovered && input->GetKeyDown(Click_Left))
-		{
-			isEditing = true;
-		}
+    void TransformHandleAxis::UpdateInput(const TransformHandle_Type type, Transform* transform, Input* input)
+    {
+        // First press
+        if (isHovered && input->GetKeyDown(KeyCode::Click_Left))
+        {
+            isEditing = true;
+        }
 
-		// Editing can happen here
-		if (isEditing && input->GetKey(Click_Left))
-		{
-			if (type == TransformHandle_Position)
-			{
-				Vector3 position = transform->GetPosition();
-				position += isEditing ? delta * axis : 0;
-				transform->SetPosition(position);
-			}
-			else if (type == TransformHandle_Scale)
-			{
-				Vector3 scale = transform->GetScale();
-				scale += isEditing ? delta * axis : 0;
-				transform->SetScale(scale);
-			}
-			else if (type == TransformHandle_Rotation)
-			{
-				Vector3 rotation = transform->GetRotation().ToEulerAngles();
-				float speedMultiplier = 10.0f;
-				rotation += isEditing ? delta * axis * speedMultiplier : 0;
-				transform->SetRotation(Quaternion::FromEulerAngles(rotation));
-			}
-		}
+        // Editing can happen here
+        if (isEditing && input->GetKey(KeyCode::Click_Left))
+        {
+            if (type == TransformHandle_Position)
+            {
+                auto position = transform->GetPosition();
+                position += isEditing ? delta * axis : 0.0f;
+                transform->SetPosition(position);
+            }
+            else if (type == TransformHandle_Scale)
+            {
+                auto scale = transform->GetScale();
+                scale += isEditing ? delta * axis : 0.0f;
+                transform->SetScale(scale);
+            }
+            else if (type == TransformHandle_Rotation)
+            {
+                auto rotation = transform->GetRotation().ToEulerAngles();
+                const auto speed_multiplier = 10.0f;
+                rotation += isEditing ? delta * axis * speed_multiplier : 0.0f;
+                transform->SetRotation(Quaternion::FromEulerAngles(rotation));
+            }
+        }
 
-		// Last press (on release)
-		if (isEditing && input->GetKeyUp(Click_Left))
-		{
-			isEditing = false;
-		}
-	}
+        // Last press (on release)
+        if (isEditing && input->GetKeyUp(KeyCode::Click_Left))
+        {
+            isEditing = false;
+        }
+    }
 
-	void TransformHandleAxis::DrawExtra(Renderer* renderer, const Vector3& transformCenter)
-	{
-		// Draw axis line (connect the handle with the origin of the transform)
-		Vector4 color = Vector4(GetColor(), 1.0f);
-		renderer->DrawLine(box_transformed.GetCenter(), transformCenter, color, color, false);
-	}
+    void TransformHandleAxis::DrawExtra(Renderer* renderer, const Vector3& transform_center) const
+    {
+        // Draw axis line (connect the handle with the origin of the transform)
+        const Vector4 color = Vector4(GetColor(), 1.0f);
+        const Vector3 from  = box_transformed.GetCenter();
+        const Vector3& to   = transform_center;
+        renderer->DrawDebugLine(from, to, color, color, 0.0f, false);
+    }
 
-	void TransformHandle::Initialize(TransformHandle_Type type, Context* context)
-	{
-		m_type		= type;
-		m_context	= context;
-		m_renderer	= context->GetSubsystem<Renderer>().get();
-		m_input		= context->GetSubsystem<Input>().get();
+    void TransformHandle::Initialize(const TransformHandle_Type type, Context* context)
+    {
+        m_type      = type;
+        m_context   = context;
+        m_renderer  = context->GetSubsystem<Renderer>();
+        m_input     = context->GetSubsystem<Input>();
 
-		m_ray_previous	= Vector3::Zero;
-		m_ray_current	= Vector3::Zero;
+        m_handle_x      = TransformHandleAxis(Vector3::Right, m_context);
+        m_handle_y      = TransformHandleAxis(Vector3::Up, m_context);
+        m_handle_z      = TransformHandleAxis(Vector3::Forward, m_context);
+        m_handle_xyz    = TransformHandleAxis(Vector3::One, m_context);
 
-		// Create position controller
-		vector<RHI_Vertex_PosUvNorTan> vertices;
-		vector<unsigned int> indices;
-		if (m_type == TransformHandle_Position)
-		{
-			Utility::Geometry::CreateCone(&vertices, &indices);
-		}
-		else if (m_type == TransformHandle_Scale)
-		{
-			Utility::Geometry::CreateCube(&vertices, &indices);
-		}
-		else if (m_type == TransformHandle_Rotation)
-		{
-			// I am super lazy at this very moment, let's just use a cylinder for now...
-			Utility::Geometry::CreateCylinder(&vertices, &indices);
-		}
-		m_model = make_unique<Model>(m_context);
-		m_model->Geometry_Append(indices, vertices);
-		m_model->Geometry_Update();
+        m_ray_previous  = Vector3::Zero;
+        m_ray_current   = Vector3::Zero;
 
-		// Create bounding boxes for the handles, based on the vertices used
-		m_handle_x.box		= vertices;
-		m_handle_y.box		= m_handle_x.box;
-		m_handle_z.box		= m_handle_x.box;
-		m_handle_xyz.box	= m_handle_x.box;
-	}
+        // Create position controller
+        vector<RHI_Vertex_PosTexNorTan> vertices;
+        vector<uint32_t> indices;
+        if (m_type == TransformHandle_Position)
+        {
+            Utility::Geometry::CreateCone(&vertices, &indices);
+        }
+        else if (m_type == TransformHandle_Scale)
+        {
+            Utility::Geometry::CreateCube(&vertices, &indices);
+        }
+        else if (m_type == TransformHandle_Rotation)
+        {
+            // I am super lazy at this very moment, let's just use a cylinder for now...
+            Utility::Geometry::CreateCylinder(&vertices, &indices);
+        }
+        m_model = make_unique<Model>(m_context);
+        m_model->AppendGeometry(indices, vertices);
+        m_model->UpdateGeometry();
 
-	bool TransformHandle::Update(TransformHandle_Space space, const shared_ptr<Entity>& entity, Camera* camera, float handle_size, float handle_speed)
-	{
-		if (!entity || !camera)
-		{
-			LOG_ERROR_INVALID_PARAMETER();
-			return false;
-		}
+        // Create bounding boxes for the handles, based on the vertices used
+        m_handle_x.box      = BoundingBox(vertices.data(), static_cast<uint32_t>(vertices.size()));
+        m_handle_y.box      = m_handle_x.box;
+        m_handle_z.box      = m_handle_x.box;
+        m_handle_xyz.box    = m_handle_x.box;
+    }
 
-		// Snap to entity position
-		SnapToTransform(space, entity, camera, handle_size);
+    bool TransformHandle::Update(const TransformHandle_Space space, Entity* entity, Camera* camera, const float handle_size, const float handle_speed)
+    {
+        if (!entity || !camera)
+        {
+            LOG_ERROR_INVALID_PARAMETER();
+            return false;
+        }
 
-		// Do hit test
-		if (camera)
-		{
-			// Create ray starting from camera position and pointing towards where the mouse is pointing
-			Vector2	mouse_pos				= m_input->GetMousePosition();
-			const RHI_Viewport& viewport	= m_context->GetSubsystem<Renderer>()->GetViewport();
-			Vector2 editor_offset			= m_context->GetSubsystem<Renderer>()->viewport_editorOffset;
-			Vector2 mouse_pos_relative		= mouse_pos - editor_offset;
-			Vector3 ray_start				= camera->GetTransform()->GetPosition();
-			Vector3 ray_end					= camera->ScreenToWorldPoint(mouse_pos_relative);
-			Ray ray							= Ray(ray_start, ray_end);
+        // Snap to entity position
+        SnapToTransform(space, entity, camera, handle_size);
 
-			// Test if ray intersects any of the handles
-			bool hovered_x		= ray.HitDistance(m_handle_x.box_transformed) != INFINITY;
-			bool hovered_y		= ray.HitDistance(m_handle_y.box_transformed) != INFINITY;
-			bool hovered_z		= ray.HitDistance(m_handle_z.box_transformed) != INFINITY;
-			bool hovered_xyz	= ray.HitDistance(m_handle_xyz.box_transformed) != INFINITY;
+        // Do hit test
+        if (camera)
+        {
+            // Create ray starting from camera position and pointing towards where the mouse is pointing
+            const auto mouse_pos            = m_input->GetMousePosition();
+            const auto& viewport            = m_context->GetSubsystem<Renderer>()->GetViewport();
+            const auto& editor_offset       = m_context->GetSubsystem<Renderer>()->GetViewportOffset();
+            const auto mouse_pos_relative   = mouse_pos - editor_offset;
+            const auto ray_start            = camera->GetTransform()->GetPosition();
+            auto ray_end                    = camera->Unproject(mouse_pos_relative);
+            const auto ray                  = Ray(ray_start, ray_end);
 
-			// Mark a handle as hovered, only if it's the only hovered handle (during the previous frame
-			m_handle_x.isHovered		= hovered_x && !(m_handle_y.isHovered || m_handle_z.isHovered);
-			m_handle_y.isHovered		= hovered_y && !(m_handle_x.isHovered || m_handle_z.isHovered);
-			m_handle_z.isHovered		= hovered_z && !(m_handle_x.isHovered || m_handle_y.isHovered);
-			m_handle_xyz.isHovered		= hovered_xyz && !(m_handle_x.isHovered || m_handle_y.isHovered || m_handle_z.isHovered);
+            // Test if ray intersects any of the handles
+            const auto hovered_x    = ray.HitDistance(m_handle_x.box_transformed)   != INFINITY;
+            const auto hovered_y    = ray.HitDistance(m_handle_y.box_transformed)   != INFINITY;
+            const auto hovered_z    = ray.HitDistance(m_handle_z.box_transformed)   != INFINITY;
+            const auto hovered_xyz  = ray.HitDistance(m_handle_xyz.box_transformed) != INFINITY;
 
-			// Disable handle if one of the other two is active (affects the color)
-			m_handle_x.isDisabled	= !m_handle_x.isEditing		&& (m_handle_y.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing);
-			m_handle_y.isDisabled	= !m_handle_y.isEditing		&& (m_handle_x.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing);
-			m_handle_z.isDisabled	= !m_handle_z.isEditing		&& (m_handle_x.isEditing || m_handle_y.isEditing || m_handle_xyz.isEditing);
-			m_handle_xyz.isDisabled = !m_handle_xyz.isEditing	&& (m_handle_x.isEditing || m_handle_y.isEditing || m_handle_z.isEditing);
+            // Mark a handle as hovered, only if it's the only hovered handle (during the previous frame
+            m_handle_x.isHovered        = hovered_x && !(m_handle_y.isHovered || m_handle_z.isHovered);
+            m_handle_y.isHovered        = hovered_y && !(m_handle_x.isHovered || m_handle_z.isHovered);
+            m_handle_z.isHovered        = hovered_z && !(m_handle_x.isHovered || m_handle_y.isHovered);
+            m_handle_xyz.isHovered      = hovered_xyz && !(m_handle_x.isHovered || m_handle_y.isHovered || m_handle_z.isHovered);
 
-			// Track delta
-			m_ray_previous	= m_ray_current != Vector3::Zero ? m_ray_current : ray_end; // avoid big delta in the first run
-			m_ray_current	= ray_end;
-			Vector3 delta	= m_ray_current - m_ray_previous;
-			float delta_xyz = delta.Length();
+            // Disable handle if one of the other two is active (affects the color)
+            m_handle_x.isDisabled       = !m_handle_x.isEditing     && (m_handle_y.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing);
+            m_handle_y.isDisabled       = !m_handle_y.isEditing     && (m_handle_x.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing);
+            m_handle_z.isDisabled       = !m_handle_z.isEditing     && (m_handle_x.isEditing || m_handle_y.isEditing || m_handle_xyz.isEditing);
+            m_handle_xyz.isDisabled     = !m_handle_xyz.isEditing   && (m_handle_x.isEditing || m_handle_y.isEditing || m_handle_z.isEditing);
 
-			// Updated handles with delta
-			m_handle_x.delta	= delta_xyz * Sign(delta.x) * handle_speed;
-			m_handle_y.delta	= delta_xyz * Sign(delta.y) * handle_speed;
-			m_handle_z.delta	= delta_xyz * Sign(delta.z) * handle_speed;
-			m_handle_xyz.delta	= m_handle_x.delta + m_handle_y.delta + m_handle_z.delta;
+            // Track delta
+            m_ray_previous          = m_ray_current != Vector3::Zero ? m_ray_current : ray_end; // avoid big delta in the first run
+            m_ray_current           = ray_end;
+            const auto delta        = m_ray_current - m_ray_previous;
+            const auto delta_xyz    = delta.Length();
 
-			// Update input
-			m_handle_x.UpdateInput(m_type, entity->GetTransform_PtrRaw(), m_input);
-			m_handle_y.UpdateInput(m_type, entity->GetTransform_PtrRaw(), m_input);
-			m_handle_z.UpdateInput(m_type, entity->GetTransform_PtrRaw(), m_input);
-			m_handle_xyz.UpdateInput(m_type, entity->GetTransform_PtrRaw(), m_input);
-		}
+            // If the delta reached infinity, ignore the input as it will result in NaN position.
+            // This can happen if the transformation is happening extremely close the actual viewport camera.
+            if (isinf(delta_xyz))
+                return true;
 
-		return m_handle_x.isEditing ||  m_handle_y.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing;
-	}
+            // Updated handles with delta
+            m_handle_x.delta    = delta_xyz * Helper::Sign(delta.x) * handle_speed;
+            m_handle_y.delta    = delta_xyz * Helper::Sign(delta.y) * handle_speed;
+            m_handle_z.delta    = delta_xyz * Helper::Sign(delta.z) * handle_speed;
+            m_handle_xyz.delta  = m_handle_x.delta + m_handle_y.delta + m_handle_z.delta;
 
-	const Matrix& TransformHandle::GetTransform(const Vector3& axis) const
-	{
-		if (axis == Vector3::Right)
-		{
-			return m_handle_x.transform;
-		}
-		else if (axis == Vector3::Up)
-		{
-			return m_handle_y.transform;
-		}
-		else if (axis == Vector3::Forward)
-		{
-			return m_handle_z.transform;
-		}
+            // Update input
+            m_handle_x.UpdateInput(m_type, entity->GetTransform(), m_input);
+            m_handle_y.UpdateInput(m_type, entity->GetTransform(), m_input);
+            m_handle_z.UpdateInput(m_type, entity->GetTransform(), m_input);
+            m_handle_xyz.UpdateInput(m_type, entity->GetTransform(), m_input);
+        }
 
-		return m_handle_xyz.transform;
-	}
+        return m_handle_x.isEditing || m_handle_y.isEditing || m_handle_z.isEditing || m_handle_xyz.isEditing;
+    }
 
-	const Vector3& TransformHandle::GetColor(const Vector3& axis) const
-	{
-		if (axis == Vector3::Right)
-		{
-			return m_handle_x.GetColor();
-		}
-		else if (axis == Vector3::Up)
-		{
-			return m_handle_y.GetColor();
-		}
-		else if (axis == Vector3::Forward)
-		{
-			return m_handle_z.GetColor();
-		}
+    const Matrix& TransformHandle::GetTransform(const Vector3& axis) const
+    {
+        if (axis == Vector3::Right)
+        {
+            return m_handle_x.transform;
+        }
+        if (axis == Vector3::Up)
+        {
+            return m_handle_y.transform;
+        }
+        if (axis == Vector3::Forward)
+        {
+            return m_handle_z.transform;
+        }
 
-		return m_handle_xyz.GetColor();
-	}
+        return m_handle_xyz.transform;
+    }
 
-	shared_ptr<RHI_VertexBuffer> TransformHandle::GetVertexBuffer()
-	{
-		return m_model->GetVertexBuffer();
-	}
+    const Vector3& TransformHandle::GetColor(const Vector3& axis) const
+    {
+        if (axis == Vector3::Right)
+        {
+            return m_handle_x.GetColor();
+        }
 
-	shared_ptr<RHI_IndexBuffer> TransformHandle::GetIndexBuffer()
-	{
-		return m_model->GetIndexBuffer();
-	}
+        if (axis == Vector3::Up)
+        {
+            return m_handle_y.GetColor();
+        }
 
-	void TransformHandle::SnapToTransform(TransformHandle_Space space, const shared_ptr<Entity>& entity, Camera* camera, float handle_size)
-	{
-		// Get entity's components
-		Transform* entity_transform				= entity->GetTransform_PtrRaw();			// Transform alone is not enough
-		shared_ptr<Renderable> entity_renderable = entity->GetComponent<Renderable>();	// Bounding box is also needed as some meshes are not defined around P(0,0,0)	
+        if (axis == Vector3::Forward)
+        {
+            return m_handle_z.GetColor();
+        }
 
-		// Acquire entity's transformation data (local or world space)
-		Vector3 aabb_center			= entity_renderable ? entity_renderable->Geometry_AABB().GetCenter()	: Vector3::Zero;
-		Vector3 entity_position		= (space == TransformHandle_World) ? entity_transform->GetPosition() : entity_transform->GetPositionLocal();
-		Quaternion entity_rotation	= (space == TransformHandle_World) ? entity_transform->GetRotation() : entity_transform->GetRotationLocal();
-		Vector3 entity_scale			= (space == TransformHandle_World) ? entity_transform->GetScale()	: entity_transform->GetScaleLocal();
-		Vector3 right				= (space == TransformHandle_World) ? Vector3::Right					: entity_rotation * Vector3::Right;
-		Vector3 up					= (space == TransformHandle_World) ? Vector3::Up					: entity_rotation * Vector3::Up;
-		Vector3 forward				= (space == TransformHandle_World) ? Vector3::Forward				: entity_rotation * Vector3::Forward;
+        return m_handle_xyz.GetColor();
+    }
 
-		// Compute scale
-		float distance_to_camera	= camera ? (camera->GetTransform()->GetPosition() - (aabb_center)).Length()	: 0.0f;
-		float handle_scale			= distance_to_camera / (1.0f / handle_size);
-		float handle_distance		= distance_to_camera / (1.0f / 0.1f);
+    const RHI_VertexBuffer* TransformHandle::GetVertexBuffer() const
+    {
+        return m_model->GetVertexBuffer();
+    }
 
-		// Compute transform for the handles
-		m_handle_x.position		= aabb_center + right	* handle_distance;
-		m_handle_y.position		= aabb_center + up		* handle_distance;
-		m_handle_z.position		= aabb_center + forward * handle_distance;
-		m_handle_xyz.position	= aabb_center;
-		m_handle_x.rotation		= Quaternion::FromEulerAngles(0.0f, 0.0f, -90.0f);
-		m_handle_y.rotation		= Quaternion::FromLookRotation(up, up);
-		m_handle_z.rotation		= Quaternion::FromEulerAngles(90.0f, 0.0f, 0.0f);	
-		m_handle_x.scale		= handle_scale;
-		m_handle_y.scale		= handle_scale;
-		m_handle_z.scale		= handle_scale;
-		m_handle_xyz.scale		= handle_scale;
+    const RHI_IndexBuffer* TransformHandle::GetIndexBuffer() const
+    {
+        return m_model->GetIndexBuffer();
+    }
 
-		// Update transforms
-		m_handle_x.UpdateTransform();
-		m_handle_y.UpdateTransform();
-		m_handle_z.UpdateTransform();
-		m_handle_xyz.UpdateTransform();
+    void TransformHandle::SnapToTransform(const TransformHandle_Space space, Entity* entity, Camera* camera, const float handle_size)
+    {
+        // Get entity's components
+        const auto entity_transform    = entity->GetTransform();        // Transform alone is not enough
+        auto entity_renderable    = entity->GetComponent<Renderable>();    // Bounding box is also needed as some meshes are not defined around P(0,0,0)    
 
-		// Allow the handles to draw anything else they need
-		m_handle_x.DrawExtra(m_renderer, aabb_center);
-		m_handle_y.DrawExtra(m_renderer, aabb_center);
-		m_handle_z.DrawExtra(m_renderer, aabb_center);
-		m_handle_xyz.DrawExtra(m_renderer, aabb_center);
-	}
+        // Acquire entity's transformation data (local or world space)
+        const auto& aabb_center        = entity_renderable ? entity_renderable->GetAabb().GetCenter()          : entity_transform->GetPositionLocal();
+        const auto& entity_rotation    = (space == TransformHandle_World) ? entity_transform->GetRotation()    : entity_transform->GetRotationLocal();
+        const auto& right            = (space == TransformHandle_World) ? Vector3::Right                        : entity_rotation * Vector3::Right;
+        const auto& up                = (space == TransformHandle_World) ? Vector3::Up                        : entity_rotation * Vector3::Up;
+        const auto& forward            = (space == TransformHandle_World) ? Vector3::Forward                    : entity_rotation * Vector3::Forward;
+
+        // Compute scale
+        const auto distance_to_camera    = camera ? (camera->GetTransform()->GetPosition() - (aabb_center)).Length()    : 0.0f;
+        const auto handle_scale            = distance_to_camera / (1.0f / handle_size);
+        const auto handle_distance        = distance_to_camera / (1.0f / 0.1f);
+
+        // Compute transform for the handles
+        m_handle_x.position        = aabb_center + right    * handle_distance;
+        m_handle_y.position        = aabb_center + up        * handle_distance;
+        m_handle_z.position        = aabb_center + forward * handle_distance;
+        m_handle_xyz.position    = aabb_center;
+        m_handle_x.rotation        = Quaternion::FromEulerAngles(0.0f, 0.0f, -90.0f);
+        m_handle_y.rotation        = Quaternion::FromEulerAngles(0.0f, 90.0f, 0.0f);
+        m_handle_z.rotation        = Quaternion::FromEulerAngles(90.0f, 0.0f, 0.0f);    
+        m_handle_x.scale        = handle_scale;
+        m_handle_y.scale        = handle_scale;
+        m_handle_z.scale        = handle_scale;
+        m_handle_xyz.scale        = handle_scale;
+
+        // Update transforms
+        m_handle_x.UpdateTransform();
+        m_handle_y.UpdateTransform();
+        m_handle_z.UpdateTransform();
+        m_handle_xyz.UpdateTransform();
+
+        // Allow the handles to draw anything else they need
+        m_handle_x.DrawExtra(m_renderer, aabb_center);
+        m_handle_y.DrawExtra(m_renderer, aabb_center);
+        m_handle_z.DrawExtra(m_renderer, aabb_center);
+        m_handle_xyz.DrawExtra(m_renderer, aabb_center);
+    }
 }

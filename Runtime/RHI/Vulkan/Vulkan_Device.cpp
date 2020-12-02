@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,349 +19,336 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-//= IMPLEMENTATION ===============
+//= INCLUDES =====================
+#include "Spartan.h"
 #include "../RHI_Implementation.h"
-#ifdef API_VULKAN 
+#include "../RHI_Semaphore.h"
+#include "../RHI_Fence.h"
 //================================
 
-//= INCLUDES ==================
-#include "../RHI_Device.h"
-#include "../../Math/Vector4.h"
-#include "../../Logging/Log.h"
-#include <vulkan/vulkan.h>
-#include <string>
-//=============================
-
-//= NAMESPACES ================
+//= NAMESPACES ===============
 using namespace std;
-using namespace Directus::Math;
-//=============================
+using namespace Spartan::Math;
+//============================
 
-namespace Directus
+namespace Spartan
 {
-	namespace Vulkan_Device
-	{
-		inline bool AcquireValidationLayers(const std::vector<const char*>& validationLayers)
-		{
-			uint32_t layerCount;
-			vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+    RHI_Device::RHI_Device(Context* context)
+    {
+        m_context       = context;
+        m_rhi_context   = make_shared<RHI_Context>();
 
-			std::vector<VkLayerProperties> availableLayers(layerCount);
-			vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+        // Pass pointer to the widely used utility namespace
+        vulkan_utility::globals::rhi_device     = this;
+        vulkan_utility::globals::rhi_context    = m_rhi_context.get();
+        
+        // Create instance
+        VkApplicationInfo app_info = {};
+        {
+            // Deduce API version to use
+            {
+                // Get sdk version
+                uint32_t sdk_version = VK_HEADER_VERSION_COMPLETE;
 
-			for (const char* layerName : validationLayers)
-			{
-				for (const auto& layerProperties : availableLayers)
-				{
-					if (strcmp(layerName, layerProperties.layerName) == 0)
-					{
-						return true;
-					}
-				}
-			}
+                // Get driver version
+                uint32_t driver_version = 0;
+                {
+                    // Per to LunarG, if vkEnumerateInstanceVersion is not present, we are running on Vulkan 1.0
+                    // https://www.lunarg.com/wp-content/uploads/2019/02/Vulkan-1.1-Compatibility-Statement_01_19.pdf
+                    auto eiv = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(vkGetInstanceProcAddr(nullptr, "vkEnumerateInstanceVersion"));
 
-			LOG_ERROR("Vulkan_Device::RHI_Device: Validation layer was requested, but not available.");
-			return false;
-		}
+                    if (eiv)
+                    {
+                        eiv(&driver_version);
+                    }
+                    else
+                    {
+                        driver_version = VK_API_VERSION_1_0;
+                    }
+                }
 
-		inline VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pCallback)
-		{
-			if (auto func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"))
-				return func(instance, pCreateInfo, pAllocator, pCallback);
+                // Choose the version which is supported by both the sdk and the driver
+                m_rhi_context->api_version = Helper::Min(sdk_version, driver_version);
 
-			return VK_ERROR_EXTENSION_NOT_PRESENT;
-		}
+                // In case the SDK is not supported by the driver, prompt the user to update
+                if (sdk_version > driver_version)
+                {
+                    // Detect and log version
+                    string driver_version_str   = to_string(VK_VERSION_MAJOR(driver_version)) + "." + to_string(VK_VERSION_MINOR(driver_version)) + "." + to_string(VK_VERSION_PATCH(driver_version));
+                    string sdk_version_str      = to_string(VK_VERSION_MAJOR(sdk_version)) + "." + to_string(VK_VERSION_MINOR(sdk_version)) + "." + to_string(VK_VERSION_PATCH(sdk_version));
+                    LOG_WARNING("Falling back to Vulkan %s. Please update your graphics drivers to support Vulkan %s.", driver_version_str.c_str(), sdk_version_str.c_str());
+                }
+            }
 
-		inline void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT callback, const VkAllocationCallbacks* pAllocator) 
-		{
-			if (auto func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT")) 
-			{
-				func(instance, callback, pAllocator);
-			}
-		}
+            app_info.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+            app_info.pApplicationName   = sp_version;
+            app_info.pEngineName        = sp_version;
+            app_info.engineVersion      = VK_MAKE_VERSION(1, 0, 0);
+            app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+            app_info.apiVersion         = m_rhi_context->api_version;
 
-		static inline VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
-			VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
-			VkDebugUtilsMessageTypeFlagsEXT messageType,
-			const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
-			void* pUserData) 
-		{
-			Log_Type type	= Log_Info;
-			type			= messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT	? Log_Warning	: type;
-			type			= messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT		? Log_Error		: type;
-			Log::Write("Vulkan: " + string(pCallbackData->pMessage), type);
+            // Get the supported extensions out of the requested extensions
+            vector<const char*> extensions_supported = vulkan_utility::extension::get_supported_instance(m_rhi_context->extensions_instance);
 
-			return VK_FALSE;
-		}
+            VkInstanceCreateInfo create_info    = {};
+            create_info.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+            create_info.pApplicationInfo        = &app_info;
+            create_info.enabledExtensionCount   = static_cast<uint32_t>(extensions_supported.size());
+            create_info.ppEnabledExtensionNames = extensions_supported.data();
+            create_info.enabledLayerCount       = 0;
 
-		inline bool isDeviceSuitable(VkPhysicalDevice device) 
-		{
-			VkPhysicalDeviceProperties deviceProperties;
-			VkPhysicalDeviceFeatures deviceFeatures;
-			vkGetPhysicalDeviceProperties(device, &deviceProperties);
-			vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+            // Validation features
+            VkValidationFeatureEnableEXT enabled_validation_features[]  = { VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT };
+            VkValidationFeaturesEXT validation_features                 = {};
+            validation_features.sType                                   = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT;
+            validation_features.enabledValidationFeatureCount           = 1;
+            validation_features.pEnabledValidationFeatures              = enabled_validation_features;
 
-			return deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU || VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU || VK_PHYSICAL_DEVICE_TYPE_CPU;
-		}
+            if (m_rhi_context->debug)
+            {
+                // Enable validation layer
+                if (vulkan_utility::layer::is_present(m_rhi_context->validation_layers.front()))
+                {
+                    // Validation layers
+                    create_info.enabledLayerCount   = static_cast<uint32_t>(m_rhi_context->validation_layers.size());
+                    create_info.ppEnabledLayerNames = m_rhi_context->validation_layers.data();
+                    create_info.pNext               = &validation_features;
+                }
+                else
+                {
+                    LOG_ERROR("Validation layer was requested, but not available.");
+                }
+            }
 
-		VkInstance instance;
-		VkPhysicalDevice device;
-		vector<const char*> validationLayers	= { "VK_LAYER_LUNARG_standard_validation" };
-		#ifdef DEBUG
-		const bool validationLayerEnabled		= true;
-		vector<const char*> extensions			= { "VK_KHR_win32_surface", VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
-		#else
-		const bool validationLayerEnabled = false;
-		vector<const char*> extensions			= { "VK_KHR_win32_surface", VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
-		#endif
-		VkDebugUtilsMessengerEXT callback;
-	}
+            if (!vulkan_utility::error::check(vkCreateInstance(&create_info, nullptr, &m_rhi_context->instance)))
+                return;
+        }
 
-	RHI_Device::RHI_Device(void* drawHandle)
-	{
-		m_backBufferFormat				= Format_R8G8B8A8_UNORM;
-		m_depthEnabled			= true;
-		m_alphaBlendingEnabled	= false;
-		m_initialized			= false;
-		device					= nullptr;
-		deviceContext			= nullptr;
+        // Get function pointers (from extensions)
+        vulkan_utility::functions::initialize();
 
-		Settings::Get().m_versionVulkan = to_string(VK_API_VERSION_1_0);
-		LOG_INFO(Settings::Get().m_versionVulkan);
+        // Debug
+        if (m_rhi_context->debug)
+        {
+            vulkan_utility::debug::initialize(m_rhi_context->instance);
+        }
 
-		// Validation layer
-		bool validationLayerAvailable = false;
-		if (Vulkan_Device::validationLayerEnabled)
-		{
-			validationLayerAvailable = Vulkan_Device::AcquireValidationLayers(Vulkan_Device::validationLayers);
-		}
-		
-		// Create instance
-		{
-			VkApplicationInfo appInfo	= {};
-			appInfo.sType				= VK_STRUCTURE_TYPE_APPLICATION_INFO;
-			appInfo.pApplicationName	= ENGINE_VERSION;
-			appInfo.applicationVersion	= VK_MAKE_VERSION(1, 0, 0);
-			appInfo.pEngineName			= ENGINE_VERSION;
-			appInfo.engineVersion		= VK_MAKE_VERSION(1, 0, 0);
-			appInfo.apiVersion			= VK_API_VERSION_1_1;
+        // Find a physical device
+        if (!vulkan_utility::device::choose_physical_device(context->m_engine->GetWindowData().handle))
+        {
+            LOG_ERROR("Failed to find a suitable physical device.");
+            return;
+        }
 
-			VkInstanceCreateInfo createInfo		= {};
-			createInfo.sType					= VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-			createInfo.pApplicationInfo			= &appInfo;
-			createInfo.enabledExtensionCount	= (uint32_t)Vulkan_Device::extensions.size();
-			createInfo.ppEnabledExtensionNames	= Vulkan_Device::extensions.data();
-			if (validationLayerAvailable) 
-			{
-				createInfo.enabledLayerCount	= (uint32_t)Vulkan_Device::validationLayers.size();
-				createInfo.ppEnabledLayerNames	= Vulkan_Device::validationLayers.data();
-			}
-			else 
-			{
-				createInfo.enabledLayerCount = 0;
-			}
+        // Device
+        {
+            // Queue create info
+            vector<VkDeviceQueueCreateInfo> queue_create_infos;
+            {
+                vector<uint32_t> unique_queue_families =
+                {
+                    m_rhi_context->queue_graphics_index,
+                    m_rhi_context->queue_transfer_index,
+                    m_rhi_context->queue_compute_index
+                };
 
-			auto result = vkCreateInstance(&createInfo, nullptr, &Vulkan_Device::instance);
-			if (result != VK_SUCCESS)
-			{
-				LOG_ERROR("Vulkan_Device::RHI_Device: Failed to create instance.");
-				return;
-			}
-		}
-		
-		// Get available extensions
-		{
-			uint32_t extensionCount = 0;
-			vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-			std::vector<VkExtensionProperties> extensions(extensionCount);
-			vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
-			for (const auto& extension : extensions)
-			{
-				LOGF_INFO("Vulkan_Device::RHI_Device: Available extension: %s", extension.extensionName);
-			}
-		}
+                float queue_priority = 1.0f;
+                for (const uint32_t& queue_family : unique_queue_families)
+                {
+                    VkDeviceQueueCreateInfo queue_create_info    = {};
+                    queue_create_info.sType                        = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+                    queue_create_info.queueFamilyIndex            = queue_family;
+                    queue_create_info.queueCount                = 1;
+                    queue_create_info.pQueuePriorities            = &queue_priority;
+                    queue_create_infos.push_back(queue_create_info);
+                }
+            }
 
-		// Callback
-		if (Vulkan_Device::validationLayerEnabled)
-		{
-			VkDebugUtilsMessengerCreateInfoEXT createInfo = {};
-			createInfo.sType			= VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-			createInfo.messageSeverity	= VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-			createInfo.messageType		= VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-			createInfo.pfnUserCallback	= Vulkan_Device::debugCallback;
-			createInfo.pUserData		= nullptr; // Optional
+            // Get device properties
+            vkGetPhysicalDeviceProperties(static_cast<VkPhysicalDevice>(m_rhi_context->device_physical), &m_rhi_context->device_properties);
 
-			if (Vulkan_Device::CreateDebugUtilsMessengerEXT(Vulkan_Device::instance, &createInfo, nullptr, &Vulkan_Device::callback) != VK_SUCCESS) 
-			{
-				LOG_ERROR("Vulkan_Device::RHI_Device: Failed to setup callback");
-			}
-		}
+            // Resource limits
+            m_rhi_context->rhi_max_texture_dimension_2d = m_rhi_context->device_properties.limits.maxImageDimension2D;
 
-		// Device
-		{
-			Vulkan_Device::device	= VK_NULL_HANDLE;
-			uint32_t deviceCount	= 0;
-			vkEnumeratePhysicalDevices(Vulkan_Device::instance, &deviceCount, nullptr);
-			if (deviceCount == 0) 
-			{
-				LOG_ERROR("Vulkan_Device::RHI_Device: Failed to enumerate physical devices.");
-				return;
-			}
-			std::vector<VkPhysicalDevice> devices(deviceCount);
-			vkEnumeratePhysicalDevices(Vulkan_Device::instance, &deviceCount, devices.data());
-			
-			for (const auto& device : devices) 
-			{
-				if (Vulkan_Device::isDeviceSuitable(device))
-				{
-					Vulkan_Device::device = device;
-					break;
-				}
-			}
+            // Disable profiler if timestamps are not supported
+            if (m_rhi_context->profiler && !m_rhi_context->device_properties.limits.timestampComputeAndGraphics)
+            {
+                LOG_WARNING("Device doesn't support timestamps, disabling profiler...");
+                m_rhi_context->profiler = false;
+            }
 
-			if (Vulkan_Device::device == VK_NULL_HANDLE) 
-			{
-				LOG_ERROR("Vulkan_Device::RHI_Device: Failed to find a suitable device.");
-				return;
-			}
-		}
+            // Get device features
+            VkPhysicalDeviceVulkan12Features device_features_1_2_enabled    = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+            VkPhysicalDeviceFeatures2 device_features_enabled               = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &device_features_1_2_enabled };
+            {
+                // A macro to make enabling features a little easier
+                #define ENABLE_FEATURE(device_features, enabled_features, feature)                                  \
+                if (device_features.feature)                                                                        \
+                {                                                                                                   \
+                    enabled_features.feature = VK_TRUE;                                                             \
+                }                                                                                                   \
+                else                                                                                                \
+                {                                                                                                   \
+                    LOG_WARNING("Requested device feature " #feature " is not supported by the physical device");   \
+                    enabled_features.feature = VK_FALSE;                                                            \
+                }
 
-		//LOGF_INFO("Vulkan_Device::RHI_Device: Feature level %s - %s", featureLevelStr.data(), D3D11_Device::GetAdapterDescription(adapter).data());
-		device		= nullptr;
-		deviceContext = nullptr;
-		m_initialized	= false;
-	}
+                // Get
+                vkGetPhysicalDeviceFeatures2(m_rhi_context->device_physical, &m_rhi_context->device_features);
 
-	RHI_Device::~RHI_Device()
-	{	
-		if (Vulkan_Device::validationLayerEnabled) Vulkan_Device::DestroyDebugUtilsMessengerEXT(Vulkan_Device::instance, Vulkan_Device::callback, nullptr);
-		vkDestroyInstance(Vulkan_Device::instance, nullptr);
-	}
+                // Enable
+                ENABLE_FEATURE(m_rhi_context->device_features.features, device_features_enabled.features, samplerAnisotropy)
+                ENABLE_FEATURE(m_rhi_context->device_features.features, device_features_enabled.features, fillModeNonSolid)
+                ENABLE_FEATURE(m_rhi_context->device_features.features, device_features_enabled.features, wideLines)
+                ENABLE_FEATURE(m_rhi_context->device_features.features, device_features_enabled.features, imageCubeArray)
+                ENABLE_FEATURE(m_rhi_context->device_features_1_2, device_features_1_2_enabled, timelineSemaphore)
+            }
 
-	void RHI_Device::Draw(unsigned int vertexCount)
-	{
-		
-	}
+            // Determine enabled graphics shader stages
+            m_enabled_graphics_shader_stages = VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+            if (device_features_enabled.features.geometryShader)
+            {
+                m_enabled_graphics_shader_stages = VK_PIPELINE_STAGE_GEOMETRY_SHADER_BIT;
+            }
+            if (device_features_enabled.features.tessellationShader)
+            {
+                m_enabled_graphics_shader_stages = VK_PIPELINE_STAGE_TESSELLATION_CONTROL_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT;
+            }
 
-	void RHI_Device::DrawIndexed(unsigned int indexCount, unsigned int indexOffset, unsigned int vertexOffset)
-	{
-		
-	}
+            // Get the supported extensions out of the requested extensions
+            vector<const char*> extensions_supported = vulkan_utility::extension::get_supported_device(m_rhi_context->extensions_device, m_rhi_context->device_physical);
 
-	void RHI_Device::ClearBackBuffer(const Vector4& color)
-	{
+            // Device create info
+            VkDeviceCreateInfo create_info = {};
+            {
+                create_info.sType                    = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+                create_info.queueCreateInfoCount    = static_cast<uint32_t>(queue_create_infos.size());
+                create_info.pQueueCreateInfos        = queue_create_infos.data();
+                create_info.pNext                   = &device_features_enabled;
+                create_info.enabledExtensionCount    = static_cast<uint32_t>(extensions_supported.size());
+                create_info.ppEnabledExtensionNames = extensions_supported.data();
 
-	}
+                if (m_rhi_context->debug)
+                {
+                    create_info.enabledLayerCount    = static_cast<uint32_t>(m_rhi_context->validation_layers.size());
+                    create_info.ppEnabledLayerNames = m_rhi_context->validation_layers.data();
+                }
+                else
+                {
+                    create_info.enabledLayerCount = 0;
+                }
+            }
 
-	void RHI_Device::ClearRenderTarget(void* renderTarget, const Math::Vector4& color)
-	{
-		
-	}
+            // Create
+            if (!vulkan_utility::error::check(vkCreateDevice(m_rhi_context->device_physical, &create_info, nullptr, &m_rhi_context->device)))
+                return;
 
-	void RHI_Device::ClearDepthStencil(void* depthStencil, unsigned int flags, float depth, uint8_t stencil)
-	{
-		
-	}
+            // Get queues
+            vkGetDeviceQueue(m_rhi_context->device, m_rhi_context->queue_graphics_index, 0, reinterpret_cast<VkQueue*>(&m_rhi_context->queue_graphics));
+            vkGetDeviceQueue(m_rhi_context->device, m_rhi_context->queue_transfer_index, 0, reinterpret_cast<VkQueue*>(&m_rhi_context->queue_transfer));
+            vkGetDeviceQueue(m_rhi_context->device, m_rhi_context->queue_compute_index,  0, reinterpret_cast<VkQueue*>(&m_rhi_context->queue_compute));
+            
+        }
 
-	void RHI_Device::Present()
-	{
-		
-	}
+        vulkan_utility::display::detect_display_modes();
 
-	void RHI_Device::SetBackBufferAsRenderTarget()
-	{
-		
-	}
+        // Initialise the memory allocator
+        m_rhi_context->initalise_allocator();
 
-	void RHI_Device::SetVertexShader(void* buffer)
-	{
-		
-	}
+        // Detect and log version
+        string version_major    = to_string(VK_VERSION_MAJOR(app_info.apiVersion));
+        string version_minor    = to_string(VK_VERSION_MINOR(app_info.apiVersion));
+        string version_patch    = to_string(VK_VERSION_PATCH(app_info.apiVersion));
+        Settings* settings      = m_context->GetSubsystem<Settings>();
+        string version          = version_major + "." + version_minor + "." + version_patch;
+        settings->RegisterThirdPartyLib("Vulkan", version_major + "." + version_minor + "." + version_patch, "https://vulkan.lunarg.com/");
+        LOG_INFO("Vulkan %s", version.c_str());
 
-	void RHI_Device::SetPixelShader(void* buffer)
-	{
-		
-	}
+        m_initialized = true;
+    }
 
-	void RHI_Device::SetConstantBuffers(unsigned int startSlot, unsigned int bufferCount, RHI_Buffer_Scope scope, void* const* buffer)
-	{
-		
-	}
+    RHI_Device::~RHI_Device()
+    {
+        if (!m_rhi_context || !m_rhi_context->queue_graphics)
+            return;
 
-	void RHI_Device::SetSamplers(unsigned int startSlot, unsigned int samplerCount, void* const* samplers)
-	{
-		
-	}
+        // Release resources
+        if (Queue_Wait(RHI_Queue_Graphics))
+        {
+            m_rhi_context->destroy_allocator();
 
-	void RHI_Device::SetRenderTargets(unsigned int renderTargetCount, void* const* renderTargets, void* depthStencil)
-	{
-		
-	}
+            if (m_rhi_context->debug)
+            {
+                vulkan_utility::debug::shutdown(m_rhi_context->instance);
+            }
+            vkDestroyDevice(m_rhi_context->device, nullptr);
+            vkDestroyInstance(m_rhi_context->instance, nullptr);
+        }
+    }
 
-	void RHI_Device::SetTextures(unsigned int startSlot, unsigned int resourceCount, void* const* shaderResources)
-	{
-		
-	}
+    bool RHI_Device::Queue_Present(void* swapchain_view, uint32_t* image_index, RHI_Semaphore* wait_semaphore /*= nullptr*/) const
+    {
+        // Validate semaphore state
+        if (wait_semaphore) SP_ASSERT(wait_semaphore->GetState() == RHI_Semaphore_State::Signaled);
 
-	bool RHI_Device::SetResolution(int width, int height)
-	{
-		return true;
-	}
+        // Get semaphore Vulkan resource
+        void* vk_wait_semaphore = wait_semaphore ? wait_semaphore->GetResource() : nullptr;
 
-	void RHI_Device::SetViewport(const RHI_Viewport& viewport)
-	{
-		
-	}
+        VkPresentInfoKHR present_info   = {};
+        present_info.sType              = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = wait_semaphore ? 1 : 0;
+        present_info.pWaitSemaphores    = wait_semaphore ? reinterpret_cast<VkSemaphore*>(&vk_wait_semaphore) : nullptr;
+        present_info.swapchainCount     = 1;
+        present_info.pSwapchains        = reinterpret_cast<VkSwapchainKHR*>(&swapchain_view);
+        present_info.pImageIndices      = image_index;
 
-	bool RHI_Device::SetAlphaBlendingEnabled(bool enable)
-	{
-		return true;
-	}
+        lock_guard<mutex> lock(m_queue_mutex);
+        if (!vulkan_utility::error::check(vkQueuePresentKHR(static_cast<VkQueue>(m_rhi_context->queue_graphics), &present_info)))
+            return false;
 
-	void RHI_Device::EventBegin(const std::string& name)
-	{
-		
-	}
+        // Update semaphore state
+        if (wait_semaphore) wait_semaphore->SetState(RHI_Semaphore_State::Idle);
 
-	void RHI_Device::EventEnd()
-	{
-		
-	}
+        return true;
+    }
 
-	bool RHI_Device::Profiling_CreateQuery(void** query, RHI_Query_Type type)
-	{
-		return true;
-	}
+    bool RHI_Device::Queue_Submit(const RHI_Queue_Type type, void* cmd_buffer, RHI_Semaphore* wait_semaphore /*= nullptr*/, RHI_Semaphore* signal_semaphore /*= nullptr*/, RHI_Fence* signal_fence /*= nullptr*/, uint32_t wait_flags /*= 0*/) const
+    {
+        // Validate semaphore states
+        if (wait_semaphore)     SP_ASSERT(wait_semaphore->GetState() == RHI_Semaphore_State::Signaled);
+        if (signal_semaphore)   SP_ASSERT(signal_semaphore->GetState() == RHI_Semaphore_State::Idle);
 
-	void RHI_Device::Profiling_QueryStart(void* queryObject)
-	{
-		
-	}
+        // Get semaphore Vulkan resources
+        void* vk_wait_semaphore   = wait_semaphore ? wait_semaphore->GetResource() : nullptr;
+        void* vk_signal_semaphore = signal_semaphore ? signal_semaphore->GetResource() : nullptr;
 
-	void RHI_Device::Profiling_QueryEnd(void* queryObject)
-	{
-		
-	}
+        VkSubmitInfo submit_info            = {};
+        submit_info.sType                   = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.waitSemaphoreCount      = wait_semaphore ? 1 : 0;
+        submit_info.pWaitSemaphores         = wait_semaphore ? reinterpret_cast<VkSemaphore*>(&vk_wait_semaphore) : nullptr;
+        submit_info.signalSemaphoreCount    = signal_semaphore ? 1 : 0;
+        submit_info.pSignalSemaphores       = signal_semaphore ? reinterpret_cast<VkSemaphore*>(&vk_signal_semaphore) : nullptr;
+        submit_info.pWaitDstStageMask       = &wait_flags;
+        submit_info.commandBufferCount      = 1;
+        submit_info.pCommandBuffers         = reinterpret_cast<VkCommandBuffer*>(&cmd_buffer);
 
-	void RHI_Device::Profiling_GetTimeStamp(void* queryObject)
-	{
-		
-	}
+        // Get signal fence
+        void* vk_signal_fence = signal_fence ? signal_fence->GetResource() : nullptr;
 
-	float RHI_Device::Profiling_GetDuration(void* queryDisjoint, void* queryStart, void* queryEnd)
-	{
-		return 0.0f;
-	}
+        lock_guard<mutex> lock(m_queue_mutex);
+        if (!vulkan_utility::error::check(vkQueueSubmit(static_cast<VkQueue>(Queue_Get(type)), 1, &submit_info, static_cast<VkFence>(vk_signal_fence))))
+            return false;
 
-	bool RHI_Device::SetPrimitiveTopology(RHI_PrimitiveTopology_Mode primitiveTopology)
-	{
-		return true;
-	}
+        // Update semaphore states
+        if (wait_semaphore)     wait_semaphore->SetState(RHI_Semaphore_State::Idle);
+        if (signal_semaphore)   signal_semaphore->SetState(RHI_Semaphore_State::Signaled);
 
-	bool RHI_Device::SetInputLayout(void* inputLayout)
-	{
-		return true;
-	}
+        return true;
+    }
+
+    bool RHI_Device::Queue_Wait(const RHI_Queue_Type type) const
+    {
+        lock_guard<mutex> lock(m_queue_mutex);
+        return vulkan_utility::error::check(vkQueueWaitIdle(static_cast<VkQueue>(Queue_Get(type))));
+    }
 }
-
-#endif

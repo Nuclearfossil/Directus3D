@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,47 +21,59 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-//= INCLUDES ========================
-#include "../../Core/EngineDefs.h"
-#include "../../RHI/RHI_Definition.h"
+//= INCLUDES ==============================
 #include <memory>
 #include <string>
-#include <vector>
-//===================================
+#include "../../Core/Spartan_Definitions.h"
+//=========================================
 
 struct aiNode;
 struct aiScene;
 struct aiMaterial;
 struct aiMesh;
 
-namespace Directus
+namespace Spartan
 {
-	class Mesh;
-	class Context;
-	class Material;
-	class Entity;
-	class Model;
-	class Transform;
-	class World;
+    class Context;
+    class Material;
+    class Entity;
+    class Model;
+    class World;
 
-	class ENGINE_CLASS ModelImporter
-	{
-	public:
-		ModelImporter(Context* context);
-		~ModelImporter() {}
+    struct ModelParams
+    {
+        uint32_t triangle_limit;
+        uint32_t vertex_limit;
+        float max_normal_smoothing_angle;
+        float max_tangent_smoothing_angle;
+        std::string file_path;
+        std::string name;
+        bool has_animation;
+        Model* model            = nullptr;
+        const aiScene* scene    = nullptr;
+    };
 
-		bool Load(std::shared_ptr<Model> model, const std::string& filePath);
+    class SPARTAN_CLASS ModelImporter
+    {
+    public:
+        ModelImporter(Context* context);
+        ~ModelImporter() = default;
 
-	private:
-		// PROCESSING
-		void ReadNodeHierarchy(const aiScene* assimpScene, aiNode* assimpNode, std::shared_ptr<Model>& model, Entity* parentNode = nullptr, Entity* newNode = nullptr);
-		void ReadAnimations(const aiScene* scene, std::shared_ptr<Model>& model);
-		void LoadMesh(const aiScene* assimpScene, aiMesh* assimpMesh, std::shared_ptr<Model>& model, Entity* parententity);
-		void AssimpMesh_ExtractVertices(aiMesh* assimpMesh, std::vector<RHI_Vertex_PosUvNorTan>* vertices);
-		void AssimpMesh_ExtractIndices(aiMesh* assimpMesh, std::vector<unsigned int>* indices);
-		std::shared_ptr<Material> AiMaterialToMaterial(aiMaterial* assimpMaterial, std::shared_ptr<Model>& model);
+        bool Load(Model* model, const std::string& file_path);
 
-		Context* m_context;
-		World* m_world;
-	};
+    private:
+        // Parsing
+        void ParseNode(const aiNode* assimp_node, const ModelParams& params, Entity* parent_node = nullptr, Entity* new_entity = nullptr);
+        void ParseNodeMeshes(const aiNode* assimp_node, Entity* new_entity, const ModelParams& params);
+        void ParseAnimations(const ModelParams& params);
+
+        // Loading
+        void LoadMesh(aiMesh* assimp_mesh, Entity* entity_parent, const ModelParams& params);
+        void LoadBones(const aiMesh* assimp_mesh, const ModelParams& params);
+        std::shared_ptr<Material> LoadMaterial(aiMaterial* assimp_material, const ModelParams& params);
+
+        // Dependencies
+        Context* m_context;
+        World* m_world;
+    };
 }

@@ -1,5 +1,5 @@
 /*
-Copyright(c) 2016-2019 Panos Karabelas
+Copyright(c) 2016-2020 Panos Karabelas
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,75 +21,34 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #pragma once
 
-/*
-Supported formats
-BMP files[reading, writing]
-Dr.Halo CUT files[reading] *
-DDS files[reading]
-EXR files[reading, writing]
-Raw Fax G3 files[reading]
-GIF files[reading, writing]
-HDR files[reading, writing]
-ICO files[reading, writing]
-IFF files[reading]
-JBIG files[reading, writing] * *
-JNG files[reading, writing]
-JPEG / JIF files[reading, writing]
-JPEG - 2000 File Format[reading, writing]
-JPEG - 2000 codestream[reading, writing]
-JPEG - XR files[reading, writing]
-KOALA files[reading]
-Kodak PhotoCD files[reading]
-MNG files[reading]
-PCX files[reading]
-PBM / PGM / PPM files[reading, writing]
-PFM files[reading, writing]
-PNG files[reading, writing]
-Macintosh PICT files[reading]
-Photoshop PSD files[reading]
-RAW camera files[reading]
-Sun RAS files[reading]
-SGI files[reading]
-TARGA files[reading, writing]
-TIFF files[reading, writing]
-WBMP files[reading, writing]
-WebP files[reading, writing]
-XBM files[reading]
-XPM files[reading, writing]
-*/
-
-//= INCLUDES ========================
+//= INCLUDES ==============================
 #include <vector>
-#include "../../Core/EngineDefs.h"
+#include <string>
 #include "../../RHI/RHI_Definition.h"
-//===================================
+#include "../../Core/Spartan_Definitions.h"
+//=========================================
 
 struct FIBITMAP;
 
-namespace Directus
+namespace Spartan
 {
-	class Context;
+    class Context;
 
-	class ENGINE_CLASS ImageImporter
-	{
-	public:
-		ImageImporter(Context* context);
-		~ImageImporter();
+    class SPARTAN_CLASS ImageImporter
+    {
+    public:
+        ImageImporter(Context* context);
+        ~ImageImporter();
 
-		bool Load(const std::string& filePath, RHI_Texture* texture);
+        bool Load(const std::string& file_path, RHI_Texture* texture, bool generate_mipmaps = true);
 
-	private:	
-		bool GetBitsFromFIBITMAP(std::vector<std::byte>* data, FIBITMAP* bitmap, unsigned int width, unsigned int height, unsigned int channels);
-		void GenerateMipmaps(FIBITMAP* bitmap, RHI_Texture* texture, unsigned int width, unsigned int height, unsigned int channels);
+    private:    
+        bool GetBitsFromFibitmap(std::vector<std::byte>* data, FIBITMAP* bitmap, uint32_t width, uint32_t height, uint32_t channels) const;
+        void GenerateMipmaps(FIBITMAP* bitmap, RHI_Texture* texture, uint32_t width, uint32_t height, uint32_t channels);
+        FIBITMAP* ApplyBitmapCorrections(FIBITMAP* bitmap) const;
+        FIBITMAP* _FreeImage_ConvertTo32Bits(FIBITMAP* bitmap) const;
+        FIBITMAP* _FreeImage_Rescale(FIBITMAP* bitmap, uint32_t width, uint32_t height) const;
 
-		unsigned int ComputeChannelCount(FIBITMAP* bitmap);
-		unsigned int ComputeBitsPerChannel(FIBITMAP* bitmap);
-		RHI_Format ComputeTextureFormat(unsigned int bpp, unsigned int channels);
-		bool IsVisuallyGrayscale(FIBITMAP* bitmap);
-		FIBITMAP* ApplyBitmapCorrections(FIBITMAP* bitmap);
-		FIBITMAP* _FreeImage_ConvertTo32Bits(FIBITMAP* bitmap);
-		FIBITMAP* _FreeImage_Rescale(FIBITMAP* bitmap, unsigned int width, unsigned int height);
-
-		Context* m_context;
-	};
+        Context* m_context = nullptr;
+    };
 }
